@@ -3,3 +3,6 @@ websocket-client
 pandas
 python-dotenv
 streamlit
+requests
+plotly
+streamlit-autorefresh
