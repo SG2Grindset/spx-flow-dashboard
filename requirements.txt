@@ -1,8 +1,5 @@
-requests
-websocket-client
-pandas
-python-dotenv
 streamlit
+pandas
 requests
 plotly
 streamlit-autorefresh
