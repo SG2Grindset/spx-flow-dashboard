@@ -28,6 +28,12 @@ def get_secret(name: str, default=None):
 API_KEY = get_secret("TRADIER_API_KEY")
 BASE_URL = get_secret("TRADIER_BASE_URL")
 
+if not API_KEY:
+    raise ValueError("TRADIER_API_KEY is missing. Set it in .env or Streamlit secrets.")
+
+if not BASE_URL:
+    raise ValueError("TRADIER_BASE_URL is missing. Set it in .env or Streamlit secrets.")
+
 HEADERS = {
     "Authorization": f"Bearer {API_KEY}",
     "Accept": "application/json"
@@ -54,6 +60,10 @@ def get_spx_expirations():
             "includeAllRoots": "true"
         }
     )
+
+    print("EXPIRATIONS STATUS:", response.status_code)
+    print("EXPIRATIONS TEXT:", response.text)
+
     response.raise_for_status()
     data = response.json()
 
