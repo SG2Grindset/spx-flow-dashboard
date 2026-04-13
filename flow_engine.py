@@ -3,11 +3,30 @@ import os
 from pathlib import Path
 import requests
 
+try:
+    import streamlit as st
+except Exception:
+    st = None
+
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=BASE_DIR / ".env")
 
-API_KEY = os.getenv("TRADIER_API_KEY")
-BASE_URL = os.getenv("TRADIER_BASE_URL")
+def get_secret(name: str, default=None):
+    value = os.getenv(name)
+    if value:
+        return value
+
+    if st is not None:
+        try:
+            if name in st.secrets:
+                return st.secrets[name]
+        except Exception:
+            pass
+
+    return default
+
+API_KEY = get_secret("TRADIER_API_KEY")
+BASE_URL = get_secret("TRADIER_BASE_URL")
 
 HEADERS = {
     "Authorization": f"Bearer {API_KEY}",
