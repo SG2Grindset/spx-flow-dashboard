@@ -1,10 +1,11 @@
-import streamlit as st
-import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from streamlit_autorefresh import st_autorefresh
+
+import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
 from plotly.subplots import make_subplots
+from streamlit_autorefresh import st_autorefresh
 
 from flow_engine import (
     get_near_money_spx_chain,
@@ -12,20 +13,27 @@ from flow_engine import (
     summarize_premium_by_strike,
     identify_key_levels,
     generate_trade_signal,
-    get_next_spx_expiration
+    get_next_spx_expiration,
 )
 
 st.set_page_config(page_title="SPX Flow Dashboard", layout="wide")
 
 SPIKE_THRESHOLD = 5_000_000
 PROXIMITY_THRESHOLD = 5
-STRIKES_ABOVE = 10
-STRIKES_BELOW = 10
 PRICE_VIEW_RANGE = 30
 EXPIRATION = get_next_spx_expiration()
 
 CHART_WINDOW_MINUTES = 60
 BAR_INTERVAL = "3min"
+
+# ---------------------------------------------------------
+# VOLATILITY / STRIKE WIDTH SETTINGS
+# ---------------------------------------------------------
+MIN_STRIKES_EACH_SIDE = 3
+MAX_STRIKES_EACH_SIDE = 8
+ATR_LENGTH = 14
+ATR_LOW_THRESHOLD = 18.0
+ATR_HIGH_THRESHOLD = 35.0
 
 st.title("SPX 0DTE Flow Dashboard")
 st_autorefresh(interval=10000, key="flow_refresh")
@@ -35,6 +43,71 @@ if "prior_net_premium" not in st.session_state:
 
 if "flow_history" not in st.session_state:
     st.session_state["flow_history"] = []
+
+if "spot_history" not in st.session_state:
+    st.session_state["spot_history"] = []
+
+
+# ---------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------
+def fmt_dollars(value: float) -> str:
+    return f"${float(value):,.2f}"
+
+
+def fmt_number(value: float) -> str:
+    return f"{float(value):,.2f}"
+
+
+def clamp(value: int, min_value: int, max_value: int) -> int:
+    return max(min_value, min(value, max_value))
+
+
+def compute_intraday_atr(prices: list[float], length: int = 14) -> float:
+    if len(prices) < 2:
+        return 0.0
+
+    true_ranges = [abs(prices[i] - prices[i - 1]) for i in range(1, len(prices))]
+    if not true_ranges:
+        return 0.0
+
+    lookback = true_ranges[-length:]
+    return sum(lookback) / len(lookback)
+
+
+def determine_strike_span(atr_value: float) -> tuple[int, str]:
+    if atr_value >= ATR_HIGH_THRESHOLD:
+        score = 3
+    elif atr_value >= ATR_LOW_THRESHOLD:
+        score = 2
+    elif atr_value > 0:
+        score = 1
+    else:
+        score = 0
+
+    strikes_each_side = clamp(
+        MIN_STRIKES_EACH_SIDE + score,
+        MIN_STRIKES_EACH_SIDE,
+        MAX_STRIKES_EACH_SIDE
+    )
+
+    if strikes_each_side <= 3:
+        regime = "Tight"
+    elif strikes_each_side <= 5:
+        regime = "Balanced"
+    else:
+        regime = "Wide"
+
+    return strikes_each_side, regime
+
+
+def pick_label_colors(call_value: float, put_value: float) -> tuple[str, str]:
+    if call_value > put_value:
+        return "#22c55e", "#ef4444"
+    if put_value > call_value:
+        return "#ef4444", "#22c55e"
+    return "orange", "dodgerblue"
+
 
 # ---------------------------------------------------------
 # MARKET STATUS
@@ -54,13 +127,41 @@ market_open = (
 market_status = "OPEN" if market_open else "CLOSED"
 
 # ---------------------------------------------------------
-# LOAD DATA
+# LIGHT SPOT SNAPSHOT FIRST (FOR ATR HISTORY)
+# ---------------------------------------------------------
+initial_result = get_near_money_spx_chain(
+    expiration=EXPIRATION,
+    greeks=True,
+    strikes_above=MIN_STRIKES_EACH_SIDE,
+    strikes_below=MIN_STRIKES_EACH_SIDE
+)
+
+current_spot = float(initial_result["spot"])
+
+spot_history_row = {
+    "timestamp": now.replace(tzinfo=None),
+    "spot": current_spot,
+}
+
+existing_spot_history = st.session_state["spot_history"]
+if not existing_spot_history or existing_spot_history[-1]["timestamp"] != spot_history_row["timestamp"]:
+    existing_spot_history.append(spot_history_row)
+
+st.session_state["spot_history"] = existing_spot_history[-300:]
+
+spot_prices = [float(x["spot"]) for x in st.session_state["spot_history"]]
+intraday_atr = compute_intraday_atr(spot_prices, ATR_LENGTH)
+
+dynamic_strikes_each_side, volatility_regime = determine_strike_span(intraday_atr)
+
+# ---------------------------------------------------------
+# LOAD DATA WITH DYNAMIC STRIKE WIDTH
 # ---------------------------------------------------------
 result = get_near_money_spx_chain(
     expiration=EXPIRATION,
     greeks=True,
-    strikes_above=STRIKES_ABOVE,
-    strikes_below=STRIKES_BELOW
+    strikes_above=dynamic_strikes_each_side,
+    strikes_below=dynamic_strikes_each_side
 )
 
 summary = summarize_premium_flow(result["contracts"])
@@ -105,7 +206,7 @@ else:
 # ---------------------------------------------------------
 top_call_strike = levels["top_call_strike"]
 top_put_strike = levels["top_put_strike"]
-spot = result["spot"]
+spot = float(result["spot"])
 
 near_call_strike = abs(spot - top_call_strike) <= PROXIMITY_THRESHOLD
 near_put_strike = abs(spot - top_put_strike) <= PROXIMITY_THRESHOLD
@@ -113,9 +214,9 @@ near_put_strike = abs(spot - top_put_strike) <= PROXIMITY_THRESHOLD
 if near_call_strike and near_put_strike:
     proximity_label = "Near top call + put"
 elif near_call_strike:
-    proximity_label = f"Near call {top_call_strike}"
+    proximity_label = f"Near call {fmt_number(top_call_strike)}"
 elif near_put_strike:
-    proximity_label = f"Near put {top_put_strike}"
+    proximity_label = f"Near put {fmt_number(top_put_strike)}"
 else:
     proximity_label = "Not near key strike"
 
@@ -157,9 +258,9 @@ with top_left:
     c3, c4 = st.columns(2)
     c5, c6 = st.columns(2)
 
-    c1.metric("SPX", f"{result['spot']}")
-    c2.metric("Net Premium", f"${summary['net_premium']:,.0f}")
-    c3.metric("Net Change", f"${net_change:,.0f}")
+    c1.metric("SPX", fmt_number(result["spot"]))
+    c2.metric("Net Premium", fmt_dollars(summary["net_premium"]))
+    c3.metric("Net Change", fmt_dollars(net_change))
     c4.metric("Bias", signal["bias"])
     c5.metric("Action", signal["signal"])
     c6.metric("Spike", spike_label)
@@ -176,11 +277,13 @@ with top_left:
         ">
             <b>Acceleration:</b> {acceleration_label}<br>
             <b>Proximity:</b> {proximity_label}<br>
-            <b>Top Call:</b> {levels['top_call_strike']} &nbsp; | &nbsp;
-            <b>Top Put:</b> {levels['top_put_strike']} &nbsp; | &nbsp;
-            <b>Target:</b> {signal['target']}<br>
+            <b>Top Call:</b> {fmt_number(levels['top_call_strike'])} &nbsp; | &nbsp;
+            <b>Top Put:</b> {fmt_number(levels['top_put_strike'])} &nbsp; | &nbsp;
+            <b>Target:</b> {fmt_number(signal['target']) if isinstance(signal['target'], (int, float)) else signal['target']}<br>
             <b>Chart Window:</b> 1h &nbsp; | &nbsp;
-            <b>Bar Size:</b> 3min
+            <b>Bar Size:</b> 3min<br>
+            <b>ATR({ATR_LENGTH}):</b> {intraday_atr:,.2f} &nbsp; | &nbsp;
+            <b>Strike Width:</b> {dynamic_strikes_each_side} above / {dynamic_strikes_each_side} below ({volatility_regime})
         </div>
         """,
         unsafe_allow_html=True
@@ -189,7 +292,7 @@ with top_left:
 with top_right:
     st.subheader(
         f"SPX Price vs Call / Put Buying (3min Bars | Last 1 Hour) | "
-        f"Calls ${summary['call_premium']:,.0f} | Puts ${summary['put_premium']:,.0f}"
+        f"Calls {fmt_dollars(summary['call_premium'])} | Puts {fmt_dollars(summary['put_premium'])}"
     )
 
     if not history_df.empty and len(history_df) >= 2:
@@ -227,9 +330,9 @@ with top_right:
                         mode="lines",
                         name="SPX Price",
                         line=dict(color="white", width=3),
-                        connectgaps=True
+                        connectgaps=True,
                     ),
-                    secondary_y=False
+                    secondary_y=False,
                 )
 
                 chart.add_trace(
@@ -239,9 +342,9 @@ with top_right:
                         mode="lines",
                         name="Calls",
                         line=dict(color="orange", width=3),
-                        connectgaps=True
+                        connectgaps=True,
                     ),
-                    secondary_y=True
+                    secondary_y=True,
                 )
 
                 chart.add_trace(
@@ -251,9 +354,9 @@ with top_right:
                         mode="lines",
                         name="Puts",
                         line=dict(color="dodgerblue", width=3),
-                        connectgaps=True
+                        connectgaps=True,
                     ),
-                    secondary_y=True
+                    secondary_y=True,
                 )
 
                 if not bull_spikes.empty:
@@ -267,9 +370,9 @@ with top_right:
                             text=["Bull"] * len(bull_spikes),
                             textposition="top center",
                             textfont=dict(color="lime", size=11),
-                            connectgaps=True
+                            connectgaps=True,
                         ),
-                        secondary_y=True
+                        secondary_y=True,
                     )
 
                 if not bear_spikes.empty:
@@ -283,9 +386,9 @@ with top_right:
                             text=["Bear"] * len(bear_spikes),
                             textposition="top center",
                             textfont=dict(color="cyan", size=11),
-                            connectgaps=True
+                            connectgaps=True,
                         ),
-                        secondary_y=True
+                        secondary_y=True,
                     )
 
                 session_open = pd.Timestamp(now.date()) + pd.Timedelta(hours=8, minutes=30)
@@ -293,27 +396,29 @@ with top_right:
                     x=session_open,
                     line_width=1,
                     line_dash="dot",
-                    line_color="gray"
+                    line_color="gray",
                 )
 
                 latest_call = float(chart_bars["call_premium"].iloc[-1])
                 latest_put = float(chart_bars["put_premium"].iloc[-1])
                 latest_x = chart_bars["timestamp"].iloc[-1]
 
+                call_label_color, put_label_color = pick_label_colors(latest_call, latest_put)
+
                 chart.add_annotation(
                     x=latest_x,
                     y=latest_call,
                     xref="x",
                     yref="y2",
-                    text=f"Calls: ${latest_call:,.0f}",
+                    text=f"Calls: {fmt_dollars(latest_call)}",
                     showarrow=False,
                     xanchor="left",
                     yanchor="middle",
                     xshift=40,
-                    font=dict(color="orange", size=12),
+                    font=dict(color=call_label_color, size=12),
                     bgcolor="rgba(0,0,0,0.55)",
-                    bordercolor="orange",
-                    borderwidth=1
+                    bordercolor=call_label_color,
+                    borderwidth=1,
                 )
 
                 chart.add_annotation(
@@ -321,15 +426,15 @@ with top_right:
                     y=latest_put,
                     xref="x",
                     yref="y2",
-                    text=f"Puts: ${latest_put:,.0f}",
+                    text=f"Puts: {fmt_dollars(latest_put)}",
                     showarrow=False,
                     xanchor="left",
                     yanchor="middle",
                     xshift=40,
-                    font=dict(color="dodgerblue", size=12),
+                    font=dict(color=put_label_color, size=12),
                     bgcolor="rgba(0,0,0,0.55)",
-                    bordercolor="dodgerblue",
-                    borderwidth=1
+                    bordercolor=put_label_color,
+                    borderwidth=1,
                 )
 
                 price_min = result["spot"] - PRICE_VIEW_RANGE
@@ -347,25 +452,25 @@ with top_right:
                         yanchor="bottom",
                         y=1.02,
                         xanchor="left",
-                        x=0
+                        x=0,
                     ),
                     xaxis=dict(
                         title="Time",
                         showgrid=True,
                         gridcolor="rgba(255,255,255,0.08)",
-                        rangeslider=dict(visible=True)
+                        rangeslider=dict(visible=True),
                     ),
                     yaxis=dict(
                         title="SPX Price",
                         range=[price_min, price_max],
                         showgrid=True,
                         gridcolor="rgba(255,255,255,0.08)",
-                        zeroline=False
+                        zeroline=False,
                     ),
                     yaxis2=dict(
                         title="Premium",
                         showgrid=False,
-                        zeroline=False
+                        zeroline=False,
                     ),
                 )
 
@@ -374,8 +479,8 @@ with top_right:
                     use_container_width=True,
                     config={
                         "displayModeBar": True,
-                        "scrollZoom": True
-                    }
+                        "scrollZoom": True,
+                    },
                 )
             else:
                 st.info("Not enough data in the last hour yet.")
@@ -395,11 +500,15 @@ all_strikes_sorted = sorted(
 )
 
 table_rows = []
+atm_strike = min(
+    [strike for strike, _ in all_strikes_sorted],
+    key=lambda strike: abs(strike - spot)
+)
 
 for strike, data in all_strikes_sorted:
-    call_premium = round(data["call_premium"], 2)
-    put_premium = round(data["put_premium"], 2)
-    total_premium = round(data["total_premium"], 2)
+    call_premium = round(float(data["call_premium"]), 2)
+    put_premium = round(float(data["put_premium"]), 2)
+    total_premium = round(float(data["total_premium"]), 2)
 
     if call_premium > put_premium:
         dominance = "CALLS"
@@ -409,19 +518,20 @@ for strike, data in all_strikes_sorted:
         dominance = "BALANCED"
 
     table_rows.append({
-        "Strike": strike,
-        "ATM": "",
+        "Strike": float(strike),
         "Dominance": dominance,
         "Call Premium": call_premium,
         "Put Premium": put_premium,
-        "Total Premium": total_premium
+        "Total Premium": total_premium,
     })
 
 df = pd.DataFrame(table_rows)
 
-if not df.empty:
-    atm_index = (df["Strike"] - result["spot"]).abs().idxmin()
-    df.loc[atm_index, "ATM"] = "ATM"
+display_df = df.copy()
+display_df["Strike"] = display_df["Strike"].map(lambda x: f"{float(x):,.2f}")
+display_df["Call Premium"] = display_df["Call Premium"].map(lambda x: f"{float(x):,.2f}")
+display_df["Put Premium"] = display_df["Put Premium"].map(lambda x: f"{float(x):,.2f}")
+display_df["Total Premium"] = display_df["Total Premium"].map(lambda x: f"{float(x):,.2f}")
 
 def style_rows(row):
     styles = []
@@ -437,12 +547,12 @@ def style_rows(row):
             else:
                 cell_style = "background-color: #9aa0a6; color: white"
 
-        if row["ATM"] == "ATM" and col in ["Strike", "ATM"]:
+        if row["Strike"] == f"{float(atm_strike):,.2f}" and col == "Strike":
             cell_style = "background-color: #f9ab00; color: black; font-weight: bold"
 
         styles.append(cell_style)
 
     return styles
 
-styled_df = df.style.apply(style_rows, axis=1)
+styled_df = display_df.style.apply(style_rows, axis=1)
 st.dataframe(styled_df, use_container_width=True)
