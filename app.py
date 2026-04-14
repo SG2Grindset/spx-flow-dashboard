@@ -29,7 +29,7 @@ BAR_INTERVAL = "3min"
 # ---------------------------------------------------------
 # VOLATILITY / STRIKE WIDTH SETTINGS
 # ---------------------------------------------------------
-MIN_STRIKES_EACH_SIDE = 3
+MIN_STRIKES_EACH_SIDE = 4
 MAX_STRIKES_EACH_SIDE = 8
 ATR_LENGTH = 14
 ATR_LOW_THRESHOLD = 18.0
@@ -91,9 +91,9 @@ def determine_strike_span(atr_value: float) -> tuple[int, str]:
         MAX_STRIKES_EACH_SIDE
     )
 
-    if strikes_each_side <= 3:
+    if strikes_each_side <= 4:
         regime = "Tight"
-    elif strikes_each_side <= 5:
+    elif strikes_each_side <= 6:
         regime = "Balanced"
     else:
         regime = "Wide"
@@ -106,7 +106,23 @@ def pick_label_colors(call_value: float, put_value: float) -> tuple[str, str]:
         return "#22c55e", "#ef4444"
     if put_value > call_value:
         return "#ef4444", "#22c55e"
-    return "orange", "dodgerblue"
+    return "#f59e0b", "#3b82f6"
+
+
+def compute_premium_axis_range(call_series: pd.Series, put_series: pd.Series) -> list[float] | None:
+    combined = pd.concat([call_series, put_series], axis=0).dropna()
+    if combined.empty:
+        return None
+
+    p_min = float(combined.min())
+    p_max = float(combined.max())
+
+    if p_min == p_max:
+        pad = max(abs(p_min) * 0.1, 1.0)
+        return [p_min - pad, p_max + pad]
+
+    pad = max((p_max - p_min) * 0.12, 1.0)
+    return [p_min - pad, p_max + pad]
 
 
 # ---------------------------------------------------------
@@ -313,13 +329,20 @@ with top_right:
         if len(chart_bars) >= 2:
             latest_ts = chart_bars["timestamp"].max()
             cutoff = latest_ts - pd.Timedelta(minutes=CHART_WINDOW_MINUTES)
-            chart_bars = chart_bars[chart_bars["timestamp"] >= cutoff]
+
+            chart_bars = chart_bars[chart_bars["timestamp"] >= cutoff].copy()
+            chart_bars = chart_bars.sort_values("timestamp").reset_index(drop=True)
 
             if len(chart_bars) >= 2:
                 chart_bars["net_change"] = chart_bars["net_premium"].diff().fillna(0)
 
                 bull_spikes = chart_bars[chart_bars["net_change"] >= SPIKE_THRESHOLD]
                 bear_spikes = chart_bars[chart_bars["net_change"] <= -SPIKE_THRESHOLD]
+
+                premium_range = compute_premium_axis_range(
+                    chart_bars["call_premium"],
+                    chart_bars["put_premium"]
+                )
 
                 chart = make_subplots(specs=[[{"secondary_y": True}]])
 
@@ -329,7 +352,7 @@ with top_right:
                         y=chart_bars["spx_price"],
                         mode="lines",
                         name="SPX Price",
-                        line=dict(color="white", width=3),
+                        line=dict(color="#FFFFFF", width=3),
                         connectgaps=True,
                     ),
                     secondary_y=False,
@@ -341,7 +364,7 @@ with top_right:
                         y=chart_bars["call_premium"],
                         mode="lines",
                         name="Calls",
-                        line=dict(color="orange", width=3),
+                        line=dict(color="#f59e0b", width=3),
                         connectgaps=True,
                     ),
                     secondary_y=True,
@@ -353,7 +376,7 @@ with top_right:
                         y=chart_bars["put_premium"],
                         mode="lines",
                         name="Puts",
-                        line=dict(color="dodgerblue", width=3),
+                        line=dict(color="#3b82f6", width=3),
                         connectgaps=True,
                     ),
                     secondary_y=True,
@@ -447,18 +470,28 @@ with top_right:
                     plot_bgcolor="#0b1220",
                     font=dict(color="white"),
                     hovermode="x unified",
+                    showlegend=True,
                     legend=dict(
                         orientation="h",
                         yanchor="bottom",
-                        y=1.02,
+                        y=1.10,
                         xanchor="left",
                         x=0,
+                        font=dict(size=14, color="white"),
+                        bgcolor="rgba(17,24,39,0.8)",
+                        bordercolor="rgba(255,255,255,0.15)",
+                        borderwidth=1,
+                        itemwidth=50,
+                        traceorder="normal"
                     ),
                     xaxis=dict(
                         title="Time",
+                        type="date",
+                        range=[cutoff, latest_ts],
+                        autorange=False,
                         showgrid=True,
                         gridcolor="rgba(255,255,255,0.08)",
-                        rangeslider=dict(visible=True),
+                        rangeslider=dict(visible=False),
                     ),
                     yaxis=dict(
                         title="SPX Price",
@@ -469,6 +502,8 @@ with top_right:
                     ),
                     yaxis2=dict(
                         title="Premium",
+                        range=premium_range,
+                        autorange=False,
                         showgrid=False,
                         zeroline=False,
                     ),
