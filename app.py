@@ -1,823 +1,1174 @@
 # ============================================================
-# app.py
-# Options Flow Dashboard + Flow + Gamma + A+ + Tr3ndy
-# + Trade Plan + Discord + Morning Snapshot
-# + Intraday Gamma + Expected Move
+# expiration_flow_dashboard.py
+# SPY / SPX / QQQ
+# All Expirations Net Flow vs 0DTE Net Flow
+# Sends chart to Discord
 # ============================================================
 
 import os
 import time
+import tempfile
+from pathlib import Path
+from datetime import datetime
+
+import requests
+import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
+from dotenv import load_dotenv
 from streamlit_autorefresh import st_autorefresh
 
-from flow_engine import get_spx_flow_data
-from flow_scoring import score_options_flow, format_flow_alert
-from gamma_engine import get_oi_levels, get_gamma_bias
 
-from gamma_level_engine import (
-    build_gamma_delta_levels,
-    format_gamma_delta_levels,
-    build_gamma_curve_chart,
-    determine_gamma_regime
-)
+# ============================================================
+# ENV
+# ============================================================
 
-from intraday_gamma_engine import (
-    update_intraday_gamma_state,
-    build_intraday_gamma_report
-)
 
-from expected_move_engine import build_expected_move
+ENV_PATH = Path(__file__).parent / ".env"
+load_dotenv(dotenv_path=ENV_PATH, override=True)
 
-from a_plus_engine import compute_a_plus_score
-from alerts import send_discord_alert
-from trendy_edges_engine import get_trendy_edges, format_trendy_edges
-from chart_engine import build_trendy_levels_chart
-from trade_plan_engine import build_trade_plan, format_trade_plan
-from snapshot_engine import build_morning_snapshot
+TRADIER_API_KEY = os.getenv("TRADIER_API_KEY")
+TRADIER_BASE_URL = os.getenv("TRADIER_BASE_URL", "https://api.tradier.com/v1")
+
+# Discord webhooks for this dashboard.
+# Add these to your .env:
+# DISCORD_WEBHOOK_SPY0DTE=https://discord.com/api/webhooks/...
+# DISCORD_WEBHOOK_SPX0DTE=https://discord.com/api/webhooks/...
+#
+# Hard fallbacks are included below for the two webhooks you supplied.
+EXPIRATION_FLOW_WEBHOOKS = {
+    "SPY": (
+        os.getenv("DISCORD_WEBHOOK_SPY0DTE", "").strip()
+        or os.getenv("EXPIRATION_FLOW_DISCORD_WEBHOOK", "").strip()
+        or "https://discord.com/api/webhooks/1504268965076271236/-9Sicy0nJaVzph6k8cO2bVPvTfIKHmV3GXr708-ozqFu8DFsA5kDXpiuxG_i_LH6Myqm"
+    ),
+    "SPX": (
+        os.getenv("DISCORD_WEBHOOK_SPX0DTE", "").strip()
+        or "https://discord.com/api/webhooks/1504519376039317687/HXSV_L7e6eeX-ibPj0RgGcBvOoviOIO6in-FF0N5-Uy_3u8moUbKOywyH1ZIFGUGh6hP"
+    ),
+    "QQQ": os.getenv("DISCORD_WEBHOOK_QQQ0DTE", "").strip(),
+}
+
+
+def get_expiration_flow_webhook(symbol):
+    return EXPIRATION_FLOW_WEBHOOKS.get(symbol.upper().strip(), "")
+
+
+print("Expiration flow webhook endings:", {
+    sym: (url[-16:] if url else "MISSING")
+    for sym, url in EXPIRATION_FLOW_WEBHOOKS.items()
+})
+
+HEADERS = {
+    "Authorization": f"Bearer {TRADIER_API_KEY}",
+    "Accept": "application/json",
+}
 
 
 # ============================================================
-# HELPER FUNCTIONS
-# ============================================================
-
-def is_near_level(price, level, pct=0.002):
-    try:
-        if level is None:
-            return False
-        return abs(float(price) - float(level)) <= float(price) * pct
-    except Exception:
-        return False
-
-
-def fmt(value):
-    try:
-        if value is None:
-            return "—"
-        return f"{float(value):,.2f}"
-    except Exception:
-        return "—"
-
-
-def fmt_money(value):
-    try:
-        value = float(value)
-        if abs(value) >= 1_000_000:
-            return f"${value / 1_000_000:.2f}M"
-        if abs(value) >= 1_000:
-            return f"${value / 1_000:.1f}K"
-        return f"${value:,.0f}"
-    except Exception:
-        return "—"
-
-
-# ============================================================
-# PAGE SETTINGS
+# PAGE
 # ============================================================
 
 st.set_page_config(
-    page_title="Options Flow Dashboard",
-    page_icon="📊",
-    layout="wide"
+    page_title="Expiration Flow Dashboard",
+    page_icon="🟢",
+    layout="wide",
 )
 
-st.title("📊 Options Flow Dashboard")
-st.caption("Manual trade-decision support only — not auto-trading.")
+st.markdown("""
+<style>
+.stApp {
+    background-color: #202326 !important;
+    color: white !important;
+}
+
+html, body, [class*="css"] {
+    color: white !important;
+    font-family: "Segoe UI", sans-serif !important;
+}
+
+[data-testid="stHeader"] {
+    background-color: #202326 !important;
+}
+
+section[data-testid="stSidebar"] {
+    background-color: #16191c !important;
+}
+
+.block-container {
+    padding-top: 0.5rem;
+    max-width: 100%;
+    background-color: #202326 !important;
+}
+
+[data-testid="metric-container"] {
+    background: linear-gradient(145deg,#1b1f24,#111827) !important;
+    border: 1px solid rgba(255,255,255,0.10) !important;
+    padding: 14px 16px !important;
+    border-radius: 14px !important;
+    box-shadow: 0 0 14px rgba(0,0,0,0.45) !important;
+}
+
+[data-testid="stMetricLabel"] p {
+    color: #facc15 !important;
+    font-weight: 900 !important;
+    font-size: 16px !important;
+    letter-spacing: 0.5px;
+}
+
+[data-testid="stMetricValue"] div {
+    color: #ffffff !important;
+    font-weight: 900 !important;
+    font-size: 30px !important;
+    text-shadow: 0 0 10px rgba(255,255,255,0.25);
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.title("🟢 Expiration Flow Dashboard")
+st.caption("0DTE Net Flow vs All Expirations Net Flow")
 
 
 # ============================================================
-# SIDEBAR SETTINGS
+# SIDEBAR
 # ============================================================
 
-st.sidebar.header("Settings")
+SYMBOLS = ["SPY", "SPX", "QQQ"]
+
+symbol = st.sidebar.selectbox(
+    "Symbol",
+    SYMBOLS,
+    index=0,
+)
+
+discord_symbols = st.sidebar.multiselect(
+    "Discord Symbols To Send",
+    SYMBOLS,
+    default=["SPY", "SPX"],
+)
 
 auto_refresh = st.sidebar.checkbox("Auto Refresh", value=True)
 
 refresh_seconds = st.sidebar.selectbox(
     "Refresh Interval",
-    options=[15, 30, 60, 120, 300],
-    index=2
+    [15, 30, 60, 120],
+    index=0,
 )
 
-near_money_width = st.sidebar.slider(
-    "Near-Money Strike Width",
-    min_value=5,
-    max_value=150,
-    value=10,
-    step=5
+expiration_count = st.sidebar.slider(
+    "All Expirations Count",
+    min_value=2,
+    max_value=10,
+    value=5,
+    step=1,
 )
 
-atm_width = st.sidebar.slider(
-    "ATM Width",
-    min_value=5,
-    max_value=50,
-    value=10,
-    step=5
+bucket_minutes = st.sidebar.selectbox(
+    "Chart Bucket",
+    [1, 3, 5],
+    index=0,
 )
 
-min_volume = st.sidebar.slider(
-    "Minimum Option Volume",
+lookback_hours = st.sidebar.slider(
+    "Lookback Hours",
+    min_value=1,
+    max_value=10,
+    value=2,
+    step=1,
+)
+
+show_flow_dots = st.sidebar.checkbox(
+    "Show FLOW Dots",
+    value=True,
+)
+
+flow_dot_threshold = st.sidebar.number_input(
+    "FLOW Dot Threshold",
     min_value=0,
-    max_value=100,
-    value=1,
-    step=1
+    value=25_000_000,
+    step=5_000_000,
+    help="Dot fires when flow crosses above/below this threshold. Use 0 for simple zero-line crosses.",
 )
 
-send_discord = st.sidebar.checkbox("Send Discord Alerts", value=True)
-
-alert_level = st.sidebar.selectbox(
-    "Discord Alert Level",
-    ["A+ Only", "A+ & B+", "All Signals"],
-    index=0
+chain_width = st.sidebar.slider(
+    "Strike Width Around Spot",
+    min_value=25,
+    max_value=1000,
+    value=500 if symbol == "SPX" else 100,
+    step=25,
 )
+
+send_now = st.sidebar.button("Send To Discord Now")
+
+auto_send_discord = st.sidebar.checkbox(
+    "Auto Send To Discord Every 60 Seconds",
+    value=False,
+)
+
+reset_history = st.sidebar.button("Reset Session History")
+
+st.sidebar.caption("Expiration webhook endings:")
+st.sidebar.caption({
+    sym: (get_expiration_flow_webhook(sym)[-16:] if get_expiration_flow_webhook(sym) else "MISSING")
+    for sym in SYMBOLS
+})
 
 if auto_refresh:
     st_autorefresh(
         interval=refresh_seconds * 1000,
-        key="flow_refresh"
+        key="expiration_flow_refresh",
     )
+
+
+# ============================================================
+# SESSION FILES
+# ============================================================
+
+SESSION_DIR = Path(__file__).parent / "expiration_flow_history"
+SESSION_DIR.mkdir(exist_ok=True)
+
+
+def session_file(symbol):
+    return SESSION_DIR / f"expiration_flow_{symbol.upper()}.csv"
+
+
+def reset_symbol_history(symbol):
+    file_path = session_file(symbol)
+
+    if file_path.exists():
+        file_path.unlink()
+
+
+if reset_history:
+    reset_symbol_history(symbol)
+    st.sidebar.success(f"{symbol} expiration flow history reset.")
+
+
+# ============================================================
+# FORMAT HELPERS
+# ============================================================
+
+def money_fmt(v):
+    try:
+        v = float(v)
+
+        if abs(v) >= 1_000_000_000:
+            return f"{v / 1_000_000_000:.2f}B"
+
+        if abs(v) >= 1_000_000:
+            return f"{v / 1_000_000:.1f}M"
+
+        if abs(v) >= 1_000:
+            return f"{v / 1_000:.0f}K"
+
+        return f"{v:.0f}"
+
+    except Exception:
+        return "—"
+
+
+def fmt(v):
+    try:
+        return f"{float(v):,.2f}"
+    except Exception:
+        return "—"
+
+
+# ============================================================
+# TRADIER
+# ============================================================
+
+def tradier_get(endpoint, params=None):
+    if not TRADIER_API_KEY:
+        raise Exception("Missing TRADIER_API_KEY in .env")
+
+    url = f"{TRADIER_BASE_URL}/{endpoint}"
+
+    response = requests.get(
+        url,
+        headers=HEADERS,
+        params=params,
+        timeout=25,
+    )
+
+    if response.status_code != 200:
+        raise Exception(
+            f"Tradier error {response.status_code}: {response.text}"
+        )
+
+    return response.json()
+
+
+def get_price(symbol):
+    data = tradier_get(
+        "markets/quotes",
+        params={"symbols": symbol},
+    )
+
+    quote = data.get("quotes", {}).get("quote", {})
+
+    if isinstance(quote, list):
+        quote = quote[0] if quote else {}
+
+    for field in ["last", "close", "prevclose", "bid", "ask"]:
+        try:
+            value = float(quote.get(field))
+            if value > 0:
+                return value
+        except Exception:
+            pass
+
+    raise Exception(f"No valid price returned for {symbol}: {quote}")
+
+
+def get_expirations(symbol):
+    data = tradier_get(
+        "markets/options/expirations",
+        params={
+            "symbol": symbol,
+            "includeAllRoots": "true",
+            "strikes": "false",
+        },
+    )
+
+    block = data.get("expirations")
+
+    if block is None:
+        raise Exception(f"No expirations returned for {symbol}: {data}")
+
+    expirations = block.get("date", [])
+
+    if isinstance(expirations, str):
+        expirations = [expirations]
+
+    if not expirations:
+        raise Exception(f"Empty expirations for {symbol}: {data}")
+
+    return expirations
+
+
+def flatten_greeks(df):
+    if "greeks" not in df.columns:
+        return df
+
+    def get_greek(row, key):
+        g = row.get("greeks", {})
+        if isinstance(g, dict):
+            return g.get(key)
+        return None
+
+    for key in ["delta", "gamma", "theta", "vega", "rho"]:
+        if key not in df.columns:
+            df[key] = df.apply(lambda row: get_greek(row, key), axis=1)
+
+    return df
+
+
+def get_option_chain(symbol, expiration):
+    data = tradier_get(
+        "markets/options/chains",
+        params={
+            "symbol": symbol,
+            "expiration": expiration,
+            "greeks": "true",
+        },
+    )
+
+    options_block = data.get("options")
+
+    if not options_block:
+        return pd.DataFrame()
+
+    options = options_block.get("option", [])
+
+    if isinstance(options, dict):
+        options = [options]
+
+    if not options:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(options)
+    df = df.loc[:, ~df.columns.duplicated()].copy()
+
+    df = flatten_greeks(df)
+
+    if "option_type" in df.columns:
+        df["type"] = df["option_type"]
+    elif "put_call" in df.columns:
+        df["type"] = df["put_call"]
+    elif "contract_type" in df.columns:
+        df["type"] = df["contract_type"]
+    elif "type" not in df.columns:
+        raise Exception(f"No option type column found. Columns: {df.columns.tolist()}")
+
+    rename_map = {
+        "last_price": "last",
+        "trade_volume": "volume",
+        "open_int": "open_interest",
+        "oi": "open_interest",
+        "expiration_date": "expiration",
+        "exp_date": "expiration",
+        "expiry": "expiration",
+    }
+
+    for old, new in rename_map.items():
+        if old in df.columns and new not in df.columns:
+            df.rename(columns={old: new}, inplace=True)
+
+    if "expiration" not in df.columns:
+        df["expiration"] = expiration
+
+    df["type"] = (
+        df["type"]
+        .astype(str)
+        .str.lower()
+        .str.strip()
+        .replace(
+            {
+                "calls": "call",
+                "puts": "put",
+                "c": "call",
+                "p": "put",
+            }
+        )
+    )
+
+    if "last" not in df.columns:
+        if "bid" in df.columns and "ask" in df.columns:
+            df["last"] = (
+                pd.to_numeric(df["bid"], errors="coerce").fillna(0)
+                + pd.to_numeric(df["ask"], errors="coerce").fillna(0)
+            ) / 2
+        else:
+            df["last"] = 0
+
+    if "volume" not in df.columns:
+        df["volume"] = 0
+
+    if "open_interest" not in df.columns:
+        df["open_interest"] = 0
+
+    for col in ["strike", "last", "volume", "open_interest", "bid", "ask"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    df = df.dropna(subset=["strike"])
+    df = df[df["type"].isin(["call", "put"])]
+
+    return df
+
+
+# ============================================================
+# FLOW CALCULATION
+# ============================================================
+
+def filter_near_spot(df, spot, width):
+    return df[
+        (df["strike"] >= float(spot) - width)
+        & (df["strike"] <= float(spot) + width)
+    ].copy()
+
+
+def calculate_net_flow(chain_df):
+    if chain_df is None or chain_df.empty:
+        return {
+            "call_premium": 0,
+            "put_premium": 0,
+            "net_premium": 0,
+            "rows": 0,
+        }
+
+    df = chain_df.copy()
+
+    df["activity"] = pd.to_numeric(
+        df.get("volume", 0),
+        errors="coerce",
+    ).fillna(0)
+
+    df["open_interest"] = pd.to_numeric(
+        df.get("open_interest", 0),
+        errors="coerce",
+    ).fillna(0)
+
+    df.loc[df["activity"] <= 0, "activity"] = df["open_interest"]
+
+    df["last"] = pd.to_numeric(
+        df.get("last", 0),
+        errors="coerce",
+    ).fillna(0)
+
+    df["premium"] = df["last"] * df["activity"] * 100
+
+    calls = df[df["type"].str.contains("call", na=False)]
+    puts = df[df["type"].str.contains("put", na=False)]
+
+    call_premium = calls["premium"].sum()
+    put_premium = puts["premium"].sum()
+    net_premium = call_premium - put_premium
+
+    return {
+        "call_premium": call_premium,
+        "put_premium": put_premium,
+        "net_premium": net_premium,
+        "rows": len(df),
+    }
+
+
+def get_gamma_levels(chain_df):
+    if chain_df is None or chain_df.empty:
+        return {
+            "top_call_gamma": None,
+            "top_put_gamma": None,
+        }
+
+    df = chain_df.copy()
+
+    if "gamma" not in df.columns:
+        return {
+            "top_call_gamma": None,
+            "top_put_gamma": None,
+        }
+
+    df["gamma"] = pd.to_numeric(df["gamma"], errors="coerce").fillna(0)
+    df["open_interest"] = pd.to_numeric(df["open_interest"], errors="coerce").fillna(0)
+
+    df["gamma_exposure"] = df["gamma"] * df["open_interest"] * 100
+
+    calls = df[df["type"] == "call"].copy()
+    puts = df[df["type"] == "put"].copy()
+
+    call_gamma = (
+        calls.groupby("strike")["gamma_exposure"]
+        .sum()
+        .sort_values(ascending=False)
+    )
+
+    put_gamma = (
+        puts.groupby("strike")["gamma_exposure"]
+        .sum()
+        .sort_values(ascending=False)
+    )
+
+    top_call = float(call_gamma.index[0]) if not call_gamma.empty else None
+    top_put = float(put_gamma.index[0]) if not put_gamma.empty else None
+
+    return {
+        "top_call_gamma": top_call,
+        "top_put_gamma": top_put,
+    }
+
+
+def load_expiration_flow(symbol):
+    spot = get_price(symbol)
+    expirations = get_expirations(symbol)
+
+    today_exp = expirations[0]
+    selected_expirations = expirations[:expiration_count]
+
+    chains = []
+
+    zero_dte_chain = get_option_chain(symbol, today_exp)
+
+    if zero_dte_chain is not None and not zero_dte_chain.empty:
+        zero_dte_chain = filter_near_spot(
+            zero_dte_chain,
+            spot,
+            chain_width,
+        )
+
+    for exp in selected_expirations:
+        temp = get_option_chain(symbol, exp)
+
+        if temp is not None and not temp.empty:
+            temp["expiration"] = exp
+            chains.append(temp)
+
+    if chains:
+        all_chain = pd.concat(chains, ignore_index=True)
+        all_chain = filter_near_spot(
+            all_chain,
+            spot,
+            chain_width,
+        )
+    else:
+        all_chain = pd.DataFrame()
+
+    zero_flow = calculate_net_flow(zero_dte_chain)
+    all_flow = calculate_net_flow(all_chain)
+    gamma_levels = get_gamma_levels(all_chain)
+
+    return {
+        "symbol": symbol,
+        "spot": spot,
+        "today_exp": today_exp,
+        "expirations_used": selected_expirations,
+        "zero_dte": zero_flow,
+        "all_exp": all_flow,
+        "gamma_levels": gamma_levels,
+    }
+
+
+# ============================================================
+# SESSION HISTORY
+# ============================================================
+
+def append_snapshot(flow_data):
+    file_path = session_file(flow_data["symbol"])
+
+    now = datetime.now()
+
+    row = {
+        "datetime": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "time": now.strftime("%H:%M:%S"),
+        "symbol": flow_data["symbol"],
+        "spot": flow_data["spot"],
+        "zero_dte_call_premium": flow_data["zero_dte"]["call_premium"],
+        "zero_dte_put_premium": flow_data["zero_dte"]["put_premium"],
+        "zero_dte_net_premium": flow_data["zero_dte"]["net_premium"],
+        "all_exp_call_premium": flow_data["all_exp"]["call_premium"],
+        "all_exp_put_premium": flow_data["all_exp"]["put_premium"],
+        "all_exp_net_premium": flow_data["all_exp"]["net_premium"],
+        "zero_dte_rows": flow_data["zero_dte"]["rows"],
+        "all_exp_rows": flow_data["all_exp"]["rows"],
+    }
+
+    if file_path.exists():
+        try:
+            df = pd.read_csv(file_path)
+        except Exception:
+            df = pd.DataFrame()
+    else:
+        df = pd.DataFrame()
+
+    df = pd.concat(
+        [df, pd.DataFrame([row])],
+        ignore_index=True,
+    )
+
+    df.to_csv(file_path, index=False)
+
+    return df
+
+
+def normalize_history(df):
+    df = df.copy()
+
+    df["datetime"] = pd.to_datetime(
+        df.get("datetime", pd.NaT),
+        errors="coerce",
+    )
+
+    df = df.dropna(subset=["datetime"]).sort_values("datetime")
+
+    return df
+
+
+def build_chart_df(history_df):
+    if history_df is None or history_df.empty:
+        return pd.DataFrame()
+
+    df = normalize_history(history_df)
+
+    if df.empty:
+        return pd.DataFrame()
+
+    max_time = df["datetime"].max()
+    min_time = max_time - pd.Timedelta(hours=lookback_hours)
+
+    df = df[df["datetime"] >= min_time]
+
+    if df.empty:
+        return pd.DataFrame()
+
+    df = (
+        df.set_index("datetime")
+        .sort_index()
+        .resample(f"{bucket_minutes}min")
+        .agg(
+            {
+                "spot": "last",
+                "zero_dte_net_premium": "last",
+                "all_exp_net_premium": "last",
+            }
+        )
+        .dropna(how="all")
+        .reset_index()
+    )
+
+    for col in ["spot", "zero_dte_net_premium", "all_exp_net_premium"]:
+        df[col] = pd.to_numeric(
+            df.get(col, 0),
+            errors="coerce",
+        ).ffill().fillna(0)
+
+    df["zero_dte_flow"] = df["zero_dte_net_premium"].diff().fillna(0).cumsum()
+    df["all_exp_flow"] = df["all_exp_net_premium"].diff().fillna(0).cumsum()
+    df["time"] = pd.to_datetime(df["datetime"]).dt.strftime("%H:%M:%S")
+
+    return df
+
+
+# ============================================================
+# CHART
+# ============================================================
+
+def flow_comparison_chart(history_df, symbol, flow_data):
+    df = build_chart_df(history_df)
+
+    if df.empty:
+        fig = go.Figure()
+        fig.update_layout(
+            title=f"No flow history yet for {symbol}",
+            height=850,
+            paper_bgcolor="#202326",
+            plot_bgcolor="#2b2f33",
+            font=dict(color="white"),
+        )
+        return fig
+
+    # Plain string x-axis labels prevent Plotly/Kaleido Timestamp JSON errors.
+    df["time"] = df["time"].astype(str)
+
+    fig = go.Figure()
+
+    # ========================================================
+    # PRICE TRACE - RIGHT AXIS
+    # ========================================================
+    fig.add_trace(
+        go.Scatter(
+            x=df["time"],
+            y=df["spot"],
+            mode="lines",
+            name=f"{symbol} Price",
+            line=dict(color="#ffffff", width=4),
+            yaxis="y2",
+        )
+    )
+
+    # ========================================================
+    # FLOW TRACES - LEFT AXIS
+    # ========================================================
+    fig.add_trace(
+        go.Scatter(
+            x=df["time"],
+            y=df["all_exp_flow"],
+            mode="lines",
+            name="All Expirations",
+            line=dict(color="#ffe100", width=5),
+            yaxis="y",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=df["time"],
+            y=df["zero_dte_flow"],
+            mode="lines",
+            name="0DTE",
+            line=dict(color="#00ff38", width=5),
+            yaxis="y",
+        )
+    )
+
+    # ========================================================
+    # FLOW DOTS
+    # ========================================================
+    if show_flow_dots:
+        threshold = float(flow_dot_threshold)
+
+        # Safety: create FLOW dot columns if missing.
+        if "zero_bull_flow_dot" not in df.columns:
+            df["zero_bull_flow_dot"] = (
+                (df["zero_dte_flow"] > threshold)
+                & (df["zero_dte_flow"].shift(1) <= threshold)
+            )
+        if "zero_bear_flow_dot" not in df.columns:
+            df["zero_bear_flow_dot"] = (
+                (df["zero_dte_flow"] < -threshold)
+                & (df["zero_dte_flow"].shift(1) >= -threshold)
+            )
+        if "all_bull_flow_dot" not in df.columns:
+            df["all_bull_flow_dot"] = (
+                (df["all_exp_flow"] > threshold)
+                & (df["all_exp_flow"].shift(1) <= threshold)
+            )
+        if "all_bear_flow_dot" not in df.columns:
+            df["all_bear_flow_dot"] = (
+                (df["all_exp_flow"] < -threshold)
+                & (df["all_exp_flow"].shift(1) >= -threshold)
+            )
+
+        zero_bull = df[df["zero_bull_flow_dot"]]
+        zero_bear = df[df["zero_bear_flow_dot"]]
+        all_bull = df[df["all_bull_flow_dot"]]
+        all_bear = df[df["all_bear_flow_dot"]]
+
+        fig.add_trace(
+            go.Scatter(
+                x=zero_bull["time"],
+                y=zero_bull["zero_dte_flow"],
+                mode="markers+text",
+                name="0DTE Bull FLOW",
+                marker=dict(size=22, color="#22c55e", symbol="circle", line=dict(color="white", width=2)),
+                text=["FLOW"] * len(zero_bull),
+                textposition="top center",
+                textfont=dict(color="white", size=13, family="Arial Black"),
+                yaxis="y",
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=zero_bear["time"],
+                y=zero_bear["zero_dte_flow"],
+                mode="markers+text",
+                name="0DTE Bear FLOW",
+                marker=dict(size=22, color="#ef4444", symbol="circle", line=dict(color="white", width=2)),
+                text=["FLOW"] * len(zero_bear),
+                textposition="bottom center",
+                textfont=dict(color="white", size=13, family="Arial Black"),
+                yaxis="y",
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=all_bull["time"],
+                y=all_bull["all_exp_flow"],
+                mode="markers+text",
+                name="All Exp Bull FLOW",
+                marker=dict(size=18, color="#facc15", symbol="diamond", line=dict(color="white", width=2)),
+                text=["FLOW"] * len(all_bull),
+                textposition="top center",
+                textfont=dict(color="white", size=12, family="Arial Black"),
+                yaxis="y",
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=all_bear["time"],
+                y=all_bear["all_exp_flow"],
+                mode="markers+text",
+                name="All Exp Bear FLOW",
+                marker=dict(size=18, color="#f97316", symbol="diamond", line=dict(color="white", width=2)),
+                text=["FLOW"] * len(all_bear),
+                textposition="bottom center",
+                textfont=dict(color="white", size=12, family="Arial Black"),
+                yaxis="y",
+            )
+        )
+
+    fig.add_hline(y=0, line=dict(color="white", width=2, dash="solid"), yref="y")
+
+    latest_all = df["all_exp_flow"].iloc[-1]
+    latest_zero = df["zero_dte_flow"].iloc[-1]
+    latest_spot = df["spot"].iloc[-1]
+    latest_time = str(df["time"].iloc[-1])
+
+    fig.add_annotation(
+        x=latest_time,
+        y=latest_all,
+        text=f"<b>{money_fmt(latest_all)}</b>",
+        showarrow=False,
+        xanchor="left",
+        xshift=10,
+        font=dict(color="#ffe100", size=16, family="Arial Black"),
+        bgcolor="rgba(0,0,0,0.70)",
+        bordercolor="#ffe100",
+        borderwidth=1,
+        yref="y",
+    )
+
+    fig.add_annotation(
+        x=latest_time,
+        y=latest_zero,
+        text=f"<b>{money_fmt(latest_zero)}</b>",
+        showarrow=False,
+        xanchor="left",
+        xshift=10,
+        font=dict(color="#00ff38", size=16, family="Arial Black"),
+        bgcolor="rgba(0,0,0,0.70)",
+        bordercolor="#00ff38",
+        borderwidth=1,
+        yref="y",
+    )
+
+    fig.add_annotation(
+        x=latest_time,
+        y=latest_spot,
+        text=f"<b>{fmt(latest_spot)}</b>",
+        showarrow=False,
+        xanchor="left",
+        xshift=10,
+        font=dict(color="#ffffff", size=15, family="Arial Black"),
+        bgcolor="rgba(0,0,0,0.70)",
+        bordercolor="#ffffff",
+        borderwidth=1,
+        yref="y2",
+    )
+
+    # ========================================================
+    # SEPARATE FLOW AND PRICE SCALING
+    # ========================================================
+    flow_min = min(df["all_exp_flow"].min(), df["zero_dte_flow"].min(), 0)
+    flow_max = max(df["all_exp_flow"].max(), df["zero_dte_flow"].max(), 0)
+
+    flow_span = flow_max - flow_min
+    if flow_span <= 0:
+        flow_span = max(abs(flow_max), abs(flow_min), 1)
+
+    flow_pad = flow_span * 0.18
+    flow_range = [flow_min - flow_pad, flow_max + flow_pad]
+
+    price_min = df["spot"].min()
+    price_max = df["spot"].max()
+
+    price_span = price_max - price_min
+    if price_span <= 0:
+        if symbol.upper() == "SPX":
+            price_span = 10
+        elif symbol.upper() == "QQQ":
+            price_span = 1
+        else:
+            price_span = 0.75
+
+    price_pad = price_span * 0.35
+    price_range = [price_min - price_pad, price_max + price_pad]
+
+    fig.update_layout(
+        title=dict(
+            text=(
+                f"<b>{symbol} {datetime.now().strftime('%A, %B %d, %Y')}</b><br>"
+                f"<span style='font-size:18px;'>"
+                f"0DTE Exp: {flow_data['today_exp']} | "
+                f"All Exp Used: {len(flow_data['expirations_used'])} | "
+                f"Spot: {fmt(flow_data['spot'])}"
+                f"</span>"
+            ),
+            x=0.01,
+            xanchor="left",
+            font=dict(size=24, color="white"),
+        ),
+        height=900,
+        paper_bgcolor="#202326",
+        plot_bgcolor="#2b2f33",
+        font=dict(color="white", size=15),
+        xaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.16)",
+            tickfont=dict(color="white", size=14, family="Arial Black"),
+            nticks=18,
+            type="category",
+        ),
+        yaxis=dict(
+            title=dict(text="Flow Premium", font=dict(color="#facc15", size=16)),
+            side="left",
+            range=flow_range,
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.18)",
+            zeroline=True,
+            zerolinecolor="white",
+            tickformat="~s",
+            tickfont=dict(color="#facc15", size=15, family="Arial Black"),
+        ),
+        yaxis2=dict(
+            title=dict(text=f"{symbol} Price", font=dict(color="#ffffff", size=16)),
+            overlaying="y",
+            side="right",
+            range=price_range,
+            showgrid=False,
+            tickfont=dict(color="#ffffff", size=15, family="Arial Black"),
+        ),
+        legend=dict(
+            orientation="h",
+            x=0.01,
+            y=0.04,
+            bgcolor="rgba(0,0,0,0.25)",
+            font=dict(color="white", size=14, family="Arial Black"),
+        ),
+        margin=dict(l=90, r=105, t=95, b=70),
+        hovermode="x unified",
+    )
+
+    return fig
+
+
+# ============================================================
+# DISCORD
+# ============================================================
+
+def send_expiration_flow_to_discord(history_df, symbol, flow_data):
+    webhook_url = get_expiration_flow_webhook(symbol)
+
+    if not webhook_url:
+        print(f"Missing Discord webhook for {symbol}.")
+        return False
+
+    print(f"{symbol} expiration webhook ending:", webhook_url[-16:])
+
+    try:
+        fig = flow_comparison_chart(history_df, symbol, flow_data)
+
+        image_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        image_path = image_file.name
+        image_file.close()
+
+        fig.write_image(
+            image_path,
+            width=1800,
+            height=1000,
+            scale=2,
+        )
+
+        with open(image_path, "rb") as f:
+            response = requests.post(
+                webhook_url,
+                files={
+                    "file": (
+                        f"{symbol}_expiration_flow.png",
+                        f,
+                        "image/png",
+                    )
+                },
+                timeout=30,
+            )
+
+        try:
+            os.remove(image_path)
+        except Exception:
+            pass
+
+        print(f"{symbol} Expiration Flow Discord status:", response.status_code, response.text)
+
+        return response.status_code in [200, 204]
+
+    except Exception as e:
+        print(f"{symbol} Expiration Flow Discord send failed:")
+        print(e)
+        return False
 
 
 # ============================================================
 # LOAD DATA
 # ============================================================
 
-chain_df = None
-spot_price = None
-expiration = None
-symbol = "SPY"
-
 try:
-    data = get_spx_flow_data(width=near_money_width)
-
-    symbol = data.get("symbol", "SPY")
-    spot_price = data["spot_price"]
-    expiration = data["expiration"]
-    chain_df = data["chain_df"]
+    flow_data = load_expiration_flow(symbol)
+    history_df = append_snapshot(flow_data)
 
 except Exception as e:
-    st.error("Failed to load options flow data.")
-    st.exception(e)
-
-if chain_df is None or chain_df.empty:
-    st.warning("No option chain data returned.")
-    st.stop()
-
-
-# ============================================================
-# SCORE FLOW + GAMMA + A+ + TR3NDY + TRADE PLAN
-# ============================================================
-
-try:
-    flow_result = score_options_flow(
-        df=chain_df,
-        spot_price=spot_price,
-        near_money_width=near_money_width,
-        atm_width=atm_width,
-        min_volume=min_volume
-    )
-
-    oi_levels = get_oi_levels(chain_df)
-    gamma_bias = get_gamma_bias(chain_df, spot_price)
-
-    gamma_delta_result = build_gamma_delta_levels(chain_df, spot_price)
-    gamma_delta_text = format_gamma_delta_levels(gamma_delta_result)
-    gamma_delta_levels = gamma_delta_result.get("levels", {})
-    gamma_delta_detail = gamma_delta_result.get("detail")
-
-    gamma_regime = determine_gamma_regime(gamma_delta_levels)
-
-    expected_move = build_expected_move(
-        chain_df,
-        spot_price
-    )
-
-    intraday_state = update_intraday_gamma_state(
-        gamma_delta_levels
-    )
-
-    intraday_gamma = build_intraday_gamma_report(
-        intraday_state
-    )
-
-    a_plus = compute_a_plus_score(
-        flow_result=flow_result,
-        gamma_bias=gamma_bias,
-        spot_price=spot_price,
-        oi_levels=oi_levels
-    )
-
-    trendy_edges = get_trendy_edges(symbol)
-    trendy_text = format_trendy_edges(trendy_edges)
-
-    trendy_chart = build_trendy_levels_chart(
-        symbol=symbol,
-        spot_price=spot_price,
-        trendy_edges=trendy_edges,
-        gamma_levels=gamma_delta_levels,
-        expected_move=expected_move
-    )
-
-    trade_plan = build_trade_plan(
-        symbol=symbol,
-        spot_price=spot_price,
-        a_plus=a_plus,
-        flow_result=flow_result,
-        trendy_edges=trendy_edges
-    )
-
-    trade_plan_text = format_trade_plan(trade_plan)
-
-    morning_snapshot = build_morning_snapshot(
-        symbol=symbol,
-        spot_price=spot_price,
-        expiration=expiration,
-        flow_result=flow_result,
-        gamma_delta_levels=gamma_delta_levels,
-        gamma_regime=gamma_regime,
-        trendy_edges=trendy_edges,
-        trade_plan=trade_plan,
-        a_plus=a_plus,
-    )
-
-except Exception as e:
-    st.error("Scoring / Gamma / Tr3ndy / Trade Plan error.")
+    st.error(f"Failed to load expiration flow for {symbol}")
     st.exception(e)
     st.stop()
 
 
 # ============================================================
-# COMPACT TRADER COCKPIT
+# DISCORD SEND LOGIC
 # ============================================================
 
-summary = flow_result.get("summary", {})
+if "last_exp_flow_discord_send" not in st.session_state:
+    st.session_state.last_exp_flow_discord_send = 0
 
-top_call = summary.get("top_call_strike")
-top_put = summary.get("top_put_strike")
+EXP_FLOW_DISCORD_INTERVAL_SECONDS = 60
 
-near_call_target = is_near_level(spot_price, top_call)
-near_put_target = is_near_level(spot_price, top_put)
-
-daily = trendy_edges.get("daily", {})
-weekly = trendy_edges.get("weekly", {})
-
-near_demand = (
-    is_near_level(spot_price, daily.get("demand"))
-    or is_near_level(spot_price, weekly.get("demand"))
+seconds_since_exp_flow_send = (
+    time.time() - st.session_state.last_exp_flow_discord_send
 )
 
-near_supply = (
-    is_near_level(spot_price, daily.get("supply"))
-    or is_near_level(spot_price, weekly.get("supply"))
+should_auto_send_exp_flow = (
+    auto_send_discord
+    and seconds_since_exp_flow_send >= EXP_FLOW_DISCORD_INTERVAL_SECONDS
 )
 
-call_premium = summary.get("call_premium", 0)
-put_premium = summary.get("put_premium", 0)
-net_premium = summary.get("net_premium", 0)
+if send_now or should_auto_send_exp_flow:
+    send_results = []
 
-st.subheader("⚡ Trader Cockpit")
+    for sym in discord_symbols:
+        try:
+            if sym == symbol:
+                sym_flow_data = flow_data
+                sym_history_df = history_df
+            else:
+                sym_flow_data = load_expiration_flow(sym)
+                sym_history_df = append_snapshot(sym_flow_data)
 
-c1, c2, c3, c4, c5, c6 = st.columns(6)
-
-c1.metric(f"{symbol}", fmt(spot_price))
-c2.metric("Signal", a_plus.get("grade", "NEUTRAL"))
-c3.metric("Score", a_plus.get("score", 0))
-c4.metric("Flow Bias", flow_result.get("bias", "NEUTRAL"))
-c5.metric("Top Call Target", fmt(top_call))
-c6.metric("Top Put Target", fmt(top_put))
-
-c1, c2, c3, c4, c5, c6 = st.columns(6)
-
-c1.metric("Net Premium", fmt_money(net_premium))
-c2.metric("Call Prem", fmt_money(call_premium))
-c3.metric("Put Prem", fmt_money(put_premium))
-c4.metric("Entry", fmt(trade_plan.get("entry")))
-c5.metric("Stop", fmt(trade_plan.get("stop")))
-c6.metric("Target 1", fmt(trade_plan.get("target_1")))
-
-
-# ============================================================
-# MORNING GAMMA / DELTA LEVELS
-# ============================================================
-
-st.write("### 🧠 Morning Gamma / Delta Levels")
-
-if gamma_delta_result.get("error"):
-    st.warning(gamma_delta_result.get("error"))
-else:
-    g1, g2, g3, g4, g5 = st.columns(5)
-
-    g1.metric("Call Wall", fmt(gamma_delta_levels.get("call_wall")))
-    g2.metric("Put Wall", fmt(gamma_delta_levels.get("put_wall")))
-    g3.metric("Zero Gamma", fmt(gamma_delta_levels.get("zero_gamma")))
-    g4.metric("Vol Trigger", fmt(gamma_delta_levels.get("vol_trigger")))
-    g5.metric("Magnet", fmt(gamma_delta_levels.get("magnet")))
-
-    g1, g2, g3, g4 = st.columns(4)
-
-    g1.metric("C1", fmt(gamma_delta_levels.get("c1")))
-    g2.metric("C2", fmt(gamma_delta_levels.get("c2")))
-    g3.metric("L1", fmt(gamma_delta_levels.get("l1")))
-    g4.metric("L2", fmt(gamma_delta_levels.get("l2")))
-
-
-# ============================================================
-# DEALER GAMMA REGIME
-# ============================================================
-
-st.write("### 🌐 Dealer Gamma Regime")
-
-r1, r2, r3 = st.columns(3)
-
-r1.metric("Gamma Regime", gamma_regime.get("regime"))
-r2.metric("Expected Behavior", gamma_regime.get("behavior"))
-r3.metric("Net GEX", fmt_money(gamma_regime.get("net_gex")))
-
-st.info(gamma_regime.get("bias"))
-
-if gamma_regime.get("odte_note"):
-    st.caption(gamma_regime.get("odte_note"))
-
-
-# ============================================================
-# INTRADAY GAMMA SHIFT
-# ============================================================
-
-st.write("### 🔄 Intraday Gamma Shift")
-
-i1, i2, i3 = st.columns(3)
-
-i1.metric("Open GEX", fmt_money(intraday_gamma.get("open_gex")))
-i2.metric("Current GEX", fmt_money(intraday_gamma.get("current_gex")))
-i3.metric("GEX Shift", fmt_money(intraday_gamma.get("gex_shift")))
-
-i1, i2 = st.columns(2)
-
-i1.metric(
-    "Call Wall Shift",
-    f'{fmt(intraday_gamma.get("open_call_wall"))} → {fmt(intraday_gamma.get("current_call_wall"))}'
-)
-
-i2.metric(
-    "Put Wall Shift",
-    f'{fmt(intraday_gamma.get("open_put_wall"))} → {fmt(intraday_gamma.get("current_put_wall"))}'
-)
-
-i1, i2 = st.columns(2)
-
-i1.metric(
-    "Zero Gamma Shift",
-    f'{fmt(intraday_gamma.get("open_zero_gamma"))} → {fmt(intraday_gamma.get("current_zero_gamma"))}'
-)
-
-i2.metric(
-    "Vol Trigger Shift",
-    f'{fmt(intraday_gamma.get("open_vol_trigger"))} → {fmt(intraday_gamma.get("current_vol_trigger"))}'
-)
-
-gex_shift = intraday_gamma.get("gex_shift", 0)
-
-try:
-    gex_shift = float(gex_shift)
-except Exception:
-    gex_shift = 0
-
-if gex_shift > 5_000_000:
-    st.success(
-        "Dealers are adding positive gamma intraday. "
-        "Pinning / mean reversion strengthening."
-    )
-
-elif gex_shift < -5_000_000:
-    st.error(
-        "Dealers are becoming more short gamma intraday. "
-        "Trend / expansion risk increasing."
-    )
-
-else:
-    st.info("No major intraday gamma regime shift detected.")
-
-
-# ============================================================
-# EXPECTED MOVE
-# ============================================================
-
-st.write("### 📦 Expected Move")
-
-if expected_move.get("error"):
-    st.warning(expected_move.get("error"))
-
-else:
-    e1, e2, e3, e4 = st.columns(4)
-
-    e1.metric("ATM Strike", fmt(expected_move.get("atm_strike")))
-    e2.metric("Expected Move", fmt(expected_move.get("expected_move")))
-    e3.metric("Upper Expected", fmt(expected_move.get("upper")))
-    e4.metric("Lower Expected", fmt(expected_move.get("lower")))
-
-    st.caption(
-        f'Expected Move %: {expected_move.get("expected_move_pct", 0):.2f}%'
-    )
-
-    cw = gamma_delta_levels.get("call_wall")
-    pw = gamma_delta_levels.get("put_wall")
-
-    upper_em = expected_move.get("upper")
-    lower_em = expected_move.get("lower")
-
-    try:
-        if (
-            cw is not None
-            and upper_em is not None
-            and float(cw) > float(upper_em)
-        ):
-            st.success(
-                "Call Wall sits ABOVE expected move. "
-                "Upside dealer resistance may be harder to reach."
+            ok = send_expiration_flow_to_discord(
+                history_df=sym_history_df,
+                symbol=sym,
+                flow_data=sym_flow_data,
             )
 
-        if (
-            pw is not None
-            and lower_em is not None
-            and float(pw) < float(lower_em)
-        ):
-            st.success(
-                "Put Wall sits BELOW expected move. "
-                "Downside dealer support may contain movement."
-            )
+            send_results.append(f"{sym}: {'OK' if ok else 'FAILED'}")
 
-        if (
-            cw is not None
-            and upper_em is not None
-            and abs(float(cw) - float(upper_em)) < 5
-        ):
-            st.warning(
-                "Call Wall aligns closely with Expected Move HIGH."
-            )
+        except Exception as e:
+            print(f"{sym} expiration flow failed:")
+            print(e)
+            send_results.append(f"{sym}: FAILED")
 
-        if (
-            pw is not None
-            and lower_em is not None
-            and abs(float(pw) - float(lower_em)) < 5
-        ):
-            st.warning(
-                "Put Wall aligns closely with Expected Move LOW."
-            )
+    st.session_state.last_exp_flow_discord_send = time.time()
 
-    except Exception:
-        pass
+    discord_status = " | ".join(send_results)
 
-
-# ============================================================
-# GAMMA CURVE CHART
-# ============================================================
-
-gamma_curve_chart = build_gamma_curve_chart(
-    gamma_delta_result,
-    spot_price
-)
-
-if gamma_curve_chart is not None:
-    st.write("### 📈 Gamma Curve")
-    st.plotly_chart(gamma_curve_chart, use_container_width=True)
-
-
-# ============================================================
-# COMPACT REASONS / RISK
-# ============================================================
-
-left, right = st.columns([1, 1])
-
-with left:
-    st.write("**Why:**")
-    if a_plus.get("reasons"):
-        for reason in a_plus["reasons"][:3]:
-            st.write(f"• {reason}")
+    if "FAILED" in discord_status:
+        st.warning(discord_status)
     else:
-        st.write("No strong reasons yet.")
-
-with right:
-    st.write("**Risk Plan:**")
-    st.write(f"R/R: **{fmt(trade_plan.get('rr'))}**")
-    st.write(trade_plan.get("risk_note", "No risk note."))
-
-    if a_plus.get("warnings"):
-        for warning in a_plus["warnings"][:2]:
-            st.write(f"⚠️ {warning}")
+        st.success(discord_status)
 
 
 # ============================================================
-# TR3NDY CHART + LEVELS
+# DISPLAY METRICS
 # ============================================================
 
-st.subheader("📐 Key Levels")
+gamma_levels = flow_data.get("gamma_levels", {})
 
-daily_edges = trendy_edges.get("daily", {})
-weekly_edges = trendy_edges.get("weekly", {})
+m1, m2, m3, m4, m5, m6 = st.columns(6)
 
-l1, l2, l3, l4, l5, l6 = st.columns(6)
-
-l1.metric("D Supply", fmt(daily_edges.get("supply")))
-l2.metric("D Mid", fmt(daily_edges.get("mid")))
-l3.metric("D Demand", fmt(daily_edges.get("demand")))
-l4.metric("W Supply", fmt(weekly_edges.get("supply")))
-l5.metric("W Mid", fmt(weekly_edges.get("mid")))
-l6.metric("W Demand", fmt(weekly_edges.get("demand")))
-
-st.plotly_chart(trendy_chart, use_container_width=True)
-
-st.write("### 📍 Location Check")
-
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("Near Call Target", "🟢 YES" if near_call_target else "🔴 NO")
-col2.metric("Near Put Target", "🟢 YES" if near_put_target else "🔴 NO")
-col3.metric("Near Demand", "🟢 YES" if near_demand else "🔴 NO")
-col4.metric("Near Supply", "🟢 YES" if near_supply else "🔴 NO")
-
-
-# ============================================================
-# GREEN LIGHT ALIGNMENT CHECK
-# ============================================================
-
-current_grade = a_plus.get("grade", "NEUTRAL")
-
-flow_aligned = a_plus.get("bullish_flow") or a_plus.get("bearish_flow")
-
-gamma_aligned = (
-    ("LONG" in current_grade and gamma_bias.get("net_oi", 0) > 0)
-    or ("SHORT" in current_grade and gamma_bias.get("net_oi", 0) < 0)
+m1.metric("Symbol", symbol)
+m2.metric("Spot", fmt(flow_data["spot"]))
+m3.metric("0DTE Net", money_fmt(flow_data["zero_dte"]["net_premium"]))
+m4.metric("All Exp Net", money_fmt(flow_data["all_exp"]["net_premium"]))
+m5.metric(
+    "Call Gamma",
+    fmt(gamma_levels.get("top_call_gamma"))
+    if gamma_levels.get("top_call_gamma")
+    else "N/A",
+)
+m6.metric(
+    "Put Gamma",
+    fmt(gamma_levels.get("top_put_gamma"))
+    if gamma_levels.get("top_put_gamma")
+    else "N/A",
 )
 
-location_aligned = (
-    ("LONG" in current_grade and (near_demand or near_call_target))
-    or ("SHORT" in current_grade and (near_supply or near_put_target))
-)
+m7, m8, m9 = st.columns(3)
 
-all_three_aligned = flow_aligned and gamma_aligned and location_aligned
-
-st.write("### ✅ Green Light Alignment")
-
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("Flow", "🟢 YES" if flow_aligned else "🔴 NO")
-col2.metric("Gamma", "🟢 YES" if gamma_aligned else "🔴 NO")
-col3.metric("Location", "🟢 YES" if location_aligned else "🔴 NO")
-col4.metric("Green Light", "🟢 GO" if all_three_aligned else "🔴 WAIT")
-
-if all_three_aligned:
-    st.success("✅ GREEN LIGHT: Flow + Gamma + Location are aligned.")
-else:
-    st.warning("⏳ WAIT: Full alignment not confirmed yet.")
+m7.metric("0DTE Rows", flow_data["zero_dte"]["rows"])
+m8.metric("All Exp Rows", flow_data["all_exp"]["rows"])
+m9.metric("0DTE Exp", flow_data["today_exp"])
 
 
 # ============================================================
-# ALERT TIER LOGIC
+# DISPLAY CHART
 # ============================================================
 
-alert_tier = None
-
-if current_grade in ["A+ LONG", "A+ SHORT"]:
-    alert_tier = "A+"
-
-elif current_grade in ["B+ LONG", "B+ SHORT"]:
-    alert_tier = "B+"
-
-elif current_grade in ["B LONG", "B SHORT"]:
-    alert_tier = "B"
-
-elif a_plus.get("bullish_flow") or a_plus.get("bearish_flow"):
-    alert_tier = "WATCH"
-
-
-send_it = False
-
-if alert_level == "A+ Only":
-    send_it = alert_tier == "A+"
-
-elif alert_level == "A+ & B+":
-    send_it = alert_tier in ["A+", "B+"]
-
-elif alert_level == "All Signals":
-    send_it = alert_tier in ["A+", "B+", "B", "WATCH"]
-
-
-# ============================================================
-# ALERT SYSTEM
-# ============================================================
-
-st.subheader("🔔 Alert Status")
-
-if "last_alert_key" not in st.session_state:
-    st.session_state.last_alert_key = None
-
-if "last_alert_time" not in st.session_state:
-    st.session_state.last_alert_time = 0
-
-ALERT_COOLDOWN_SECONDS = 60
-
-now = time.time()
-
-alert_file = None
-
-if current_grade == "A+ LONG":
-    st.success("A+ LONG DETECTED 🚀")
-    alert_file = "a_plus_long.mp3"
-
-elif current_grade == "A+ SHORT":
-    st.error("A+ SHORT DETECTED 🔻")
-    alert_file = "a_plus_short.mp3"
-
-elif current_grade in ["B+ LONG", "B+ SHORT"]:
-    st.warning(f"{current_grade} setup ⚡")
-    alert_file = "b_setup.mp3"
-
-elif current_grade in ["B LONG", "B SHORT"]:
-    st.warning(f"{current_grade} setup 👀")
-    alert_file = "b_setup.mp3"
-
-elif alert_tier == "WATCH":
-    st.info("Watch setup forming 👀")
-
-else:
-    st.info("No high-quality setup")
-
-
-alert_key = f"{symbol}_{current_grade}_{round(float(spot_price), 1)}_{expiration}"
-
-should_alert = (
-    send_it
-    and alert_tier is not None
-    and all_three_aligned
-    and alert_key != st.session_state.last_alert_key
-    and (now - st.session_state.last_alert_time) > ALERT_COOLDOWN_SECONDS
+st.plotly_chart(
+    flow_comparison_chart(
+        history_df,
+        symbol,
+        flow_data,
+    ),
+    width="stretch",
 )
 
 
-if should_alert:
-    cockpit_text = f"""
-📊 COCKPIT DATA — {symbol}
-
-Spot: {fmt(spot_price)}
-Signal: {a_plus.get("grade")}
-Score: {a_plus.get("score")}
-Flow Bias: {flow_result.get("bias")}
-Net Score: {flow_result.get("net_score")}
-
-Top Call Target: {fmt(top_call)}
-Top Put Target: {fmt(top_put)}
-
-Net Premium: {fmt_money(net_premium)}
-Call Premium: {fmt_money(call_premium)}
-Put Premium: {fmt_money(put_premium)}
-
-Dealer Gamma Regime:
-- Regime: {gamma_regime.get("regime")}
-- Behavior: {gamma_regime.get("behavior")}
-- Net GEX: {fmt_money(gamma_regime.get("net_gex"))}
-- 0DTE Note: {gamma_regime.get("odte_note")}
-
-Intraday Gamma:
-- Open GEX: {fmt_money(intraday_gamma.get("open_gex"))}
-- Current GEX: {fmt_money(intraday_gamma.get("current_gex"))}
-- GEX Shift: {fmt_money(intraday_gamma.get("gex_shift"))}
-
-Expected Move:
-- ATM Strike: {fmt(expected_move.get("atm_strike"))}
-- Expected Move: {fmt(expected_move.get("expected_move"))}
-- Upper: {fmt(expected_move.get("upper"))}
-- Lower: {fmt(expected_move.get("lower"))}
-
-Location:
-- Near Call Target: {"YES" if near_call_target else "NO"}
-- Near Put Target: {"YES" if near_put_target else "NO"}
-- Near Demand: {"YES" if near_demand else "NO"}
-- Near Supply: {"YES" if near_supply else "NO"}
-
-Green Light:
-- Flow: {"YES" if flow_aligned else "NO"}
-- Gamma: {"YES" if gamma_aligned else "NO"}
-- Location: {"YES" if location_aligned else "NO"}
-- Final: {"GO" if all_three_aligned else "WAIT"}
-""".strip()
-
-    base_message = (
-        cockpit_text
-        + "\n\n"
-        + gamma_delta_text
-        + "\n\n"
-        + trendy_text
-        + "\n\n"
-        + trade_plan_text
-    )
-
-    if alert_tier == "A+":
-        discord_message = f"🚨🚨 **{alert_tier} SIGNAL** 🚨🚨\n{base_message}"
-    elif alert_tier == "B+":
-        discord_message = f"⚡ **{alert_tier} SETUP** ⚡\n{base_message}"
-    elif alert_tier == "B":
-        discord_message = f"👀 **{alert_tier} WATCHLIST SETUP**\n{base_message}"
-    else:
-        discord_message = f"📡 **WATCH SIGNAL**\n{base_message}"
-
-    if alert_file and os.path.exists(alert_file):
-        with open(alert_file, "rb") as f:
-            st.audio(f.read(), format="audio/mp3")
-
-    if send_discord:
-        ok, result = send_discord_alert(discord_message)
-
-        if ok:
-            st.success(f"Discord alert sent: {alert_tier}")
-        else:
-            st.warning(result)
-
-    st.session_state.last_alert_key = alert_key
-    st.session_state.last_alert_time = now
-
-    st.write(f"🔊 Alert fired: {alert_tier}")
-
-
 # ============================================================
-# SIGNAL MESSAGE PREVIEW
+# RAW DATA
 # ============================================================
 
-if alert_tier:
-    st.write("### Signal Message Preview")
-    st.code(
-        format_flow_alert(flow_result, symbol=symbol)
-        + "\n\n"
-        + gamma_delta_text
-        + "\n\n"
-        + trendy_text
-        + "\n\n"
-        + trade_plan_text
-    )
+with st.expander("Expiration Flow Data"):
+    st.json(flow_data)
 
-
-# ============================================================
-# EXPANDERS
-# ============================================================
-
-with st.expander("🔥 Full Options Flow Bias"):
-    st.write(flow_result.get("message", "No flow message available."))
-
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric("Upside Score", f'{flow_result.get("upside_score", 0)}/100')
-    col2.metric("Downside Score", f'{flow_result.get("downside_score", 0)}/100')
-    col3.metric("Bias", flow_result.get("bias", "NEUTRAL"))
-
-
-with st.expander("🧠 Gamma / OI Details"):
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric("Gamma Bias", gamma_bias.get("bias", "N/A"))
-    col2.metric("Call OI", f'{gamma_bias.get("call_oi", 0):,.0f}')
-    col3.metric("Put OI", f'{gamma_bias.get("put_oi", 0):,.0f}')
-
-    left, right = st.columns(2)
-
-    with left:
-        st.write("### Top Total OI")
-        st.dataframe(oi_levels.get("top_oi"), use_container_width=True)
-
-    with right:
-        st.write("### Top Call OI")
-        st.dataframe(oi_levels.get("top_calls"), use_container_width=True)
-
-        st.write("### Top Put OI")
-        st.dataframe(oi_levels.get("top_puts"), use_container_width=True)
-
-
-with st.expander("🧠 Gamma / Delta Level Detail"):
-    if gamma_delta_result.get("error"):
-        st.warning(gamma_delta_result.get("error"))
-    else:
-        st.write(gamma_delta_text)
-
-        if gamma_delta_detail is not None:
-            st.dataframe(gamma_delta_detail, use_container_width=True)
-
-
-with st.expander("🔄 Intraday Gamma Detail"):
-    st.json(intraday_gamma)
-
-
-with st.expander("📦 Expected Move Detail"):
-    st.json(expected_move)
-
-
-with st.expander("📝 Morning Snapshot Export"):
-    st.code(morning_snapshot)
-
-    st.download_button(
-        label="Download Morning Snapshot",
-        data=morning_snapshot,
-        file_name=f"{symbol}_morning_snapshot.txt",
-        mime="text/plain"
-    )
-
-
-with st.expander("📊 Raw Option Chain"):
-    st.dataframe(chain_df, use_container_width=True)
+with st.expander("Session History"):
+    st.dataframe(history_df, width="stretch")
