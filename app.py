@@ -163,7 +163,6 @@ chain_width = st.sidebar.slider(
 )
 
 
-reset_history = st.sidebar.button("Reset Session History")
 
 st.sidebar.markdown("---")
 st.sidebar.caption(
@@ -196,10 +195,6 @@ def reset_symbol_history(symbol):
     if file_path.exists():
         file_path.unlink()
 
-
-if reset_history:
-    reset_symbol_history(symbol)
-    st.sidebar.success(f"{symbol} expiration flow history reset.")
 
 
 # ============================================================
