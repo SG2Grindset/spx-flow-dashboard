@@ -1,0 +1,95 @@
+# ============================================================
+# levels_engine.py
+# Price Targets + Support / Resistance from Options Chain
+# ============================================================
+
+import pandas as pd
+
+
+def compute_price_levels(chain_df, spot_price):
+    if chain_df is None or chain_df.empty:
+        return {}
+
+    df = chain_df.copy()
+    spot_price = float(spot_price)
+
+    calls = df[df["type"] == "call"].copy()
+    puts = df[df["type"] == "put"].copy()
+
+    # -----------------------------
+    # Resistance = call OI/premium above spot
+    # -----------------------------
+    calls_above = calls[calls["strike"] >= spot_price]
+    puts_below = puts[puts["strike"] <= spot_price]
+
+    call_levels = (
+        calls_above.groupby("strike")
+        .agg(
+            call_oi=("open_interest", "sum"),
+            call_volume=("volume", "sum"),
+            call_premium=("premium", "sum")
+        )
+        .sort_values(["call_premium", "call_oi"], ascending=False)
+    )
+
+    put_levels = (
+        puts_below.groupby("strike")
+        .agg(
+            put_oi=("open_interest", "sum"),
+            put_volume=("volume", "sum"),
+            put_premium=("premium", "sum")
+        )
+        .sort_values(["put_premium", "put_oi"], ascending=False)
+    )
+
+    # -----------------------------
+    # Total OI magnet
+    # -----------------------------
+    total_oi = (
+        df.groupby("strike")["open_interest"]
+        .sum()
+        .sort_values(ascending=False)
+    )
+
+    # -----------------------------
+    # Safe values
+    # -----------------------------
+    upside_target = call_levels.index[0] if not call_levels.empty else None
+    downside_target = put_levels.index[0] if not put_levels.empty else None
+    max_oi_magnet = total_oi.index[0] if not total_oi.empty else None
+
+    nearest_resistance = (
+        calls_above["strike"].min()
+        if not calls_above.empty
+        else None
+    )
+
+    nearest_support = (
+        puts_below["strike"].max()
+        if not puts_below.empty
+        else None
+    )
+
+    # -----------------------------
+    # Bias target
+    # -----------------------------
+    if upside_target and downside_target:
+        upside_distance = abs(upside_target - spot_price)
+        downside_distance = abs(spot_price - downside_target)
+    else:
+        upside_distance = None
+        downside_distance = None
+
+    return {
+        "spot_price": spot_price,
+        "upside_target": upside_target,
+        "downside_target": downside_target,
+        "nearest_resistance": nearest_resistance,
+        "nearest_support": nearest_support,
+        "max_oi_magnet": max_oi_magnet,
+        "upside_distance": upside_distance,
+        "downside_distance": downside_distance,
+        "call_levels": call_levels.head(10),
+        "put_levels": put_levels.head(10),
+        "total_oi": total_oi.head(10)
+    }

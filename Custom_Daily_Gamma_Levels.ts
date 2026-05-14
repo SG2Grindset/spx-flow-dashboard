@@ -1,0 +1,305 @@
+############################################################################################################
+# Custom Daily Gamma Levels
+# Generated: 2026-05-14 12:32:50 CDT
+# Symbols: SPY, SPX, XSP, QQQ, IWM, TSLA
+# Expirations Used: Next 5
+############################################################################################################
+
+input Labels_On_Top = yes;
+input Some_Bubbles_Off = yes;
+input All_Bubbles_Off = no;
+input Line_Weight = 1;
+
+def someOff = Some_Bubbles_Off or All_Bubbles_Off;
+
+def isRollover = GetYYYYMMDD() != GetYYYYMMDD()[1];
+def beforeStart = GetTime() < RegularTradingStart(GetYYYYMMDD());
+def afterEnd = GetTime() > RegularTradingEnd(GetYYYYMMDD());
+def firstBarOfDay = if (beforeStart[1] == 1 and beforeStart == 0) or
+  (isRollover and beforeStart == 0) then 1 else 0;
+def lastBarOfDay = if (afterEnd[-1] == 1 and afterEnd == 0) or
+  (isRollover[-1] and firstBarOfDay[-1]) then 1 else 0;
+
+def day = GetDay();
+def lastDay = GetLastDay();
+def isToday = day == lastDay;
+def x = if (IsNaN(close[-1]) and !IsNaN(close), BarNumber(), x[1]);
+
+############################################################################################################
+
+def _cw;
+def _c1;
+def _c2;
+def _c3;
+def _c4;
+def _l1;
+def _l2;
+def _l3;
+def _l4;
+def _pw;
+def _vt;
+def _zg;
+
+# SPY Values
+def SPY_cw = 750.0;
+def SPY_c1 = 750.0;
+def SPY_c2 = 749.0;
+def SPY_c3 = 747.0;
+def SPY_c4 = 748.0;
+def SPY_l1 = 730.0;
+def SPY_l2 = 735.0;
+def SPY_l3 = 725.0;
+def SPY_l4 = 724.0;
+def SPY_pw = 743.0;
+def SPY_vt = 750.0;
+def SPY_zg = 600.0;
+
+# SPX Values
+def SPX_cw = 7525.0;
+def SPX_c1 = 7525.0;
+def SPX_c2 = 7515.0;
+def SPX_c3 = 7500.0;
+def SPX_c4 = 7520.0;
+def SPX_l1 = 7390.0;
+def SPX_l2 = 7385.0;
+def SPX_l3 = 7395.0;
+def SPX_l4 = 7200.0;
+def SPX_pw = 7400.0;
+def SPX_vt = 7525.0;
+def SPX_zg = 6745.0;
+
+# XSP Values
+def XSP_cw = 750.0;
+def XSP_c1 = 750.0;
+def XSP_c2 = 749.0;
+def XSP_c3 = 752.0;
+def XSP_c4 = 748.0;
+def XSP_l1 = 738.0;
+def XSP_l2 = 741.0;
+def XSP_l3 = 720.0;
+def XSP_l4 = 743.0;
+def XSP_pw = 744.0;
+def XSP_vt = 750.0;
+def XSP_zg = 675.0;
+
+# QQQ Values
+def QQQ_cw = 720.0;
+def QQQ_c1 = 725.0;
+def QQQ_c2 = 720.0;
+def QQQ_c3 = 722.0;
+def QQQ_c4 = 718.0;
+def QQQ_l1 = 710.0;
+def QQQ_l2 = 700.0;
+def QQQ_l3 = 713.0;
+def QQQ_l4 = 705.0;
+def QQQ_pw = 710.0;
+def QQQ_vt = 720.0;
+def QQQ_zg = 569.0;
+
+# IWM Values
+def IWM_cw = 285.0;
+def IWM_c1 = 285.0;
+def IWM_c2 = 286.0;
+def IWM_c3 = 284.0;
+def IWM_c4 = 290.0;
+def IWM_l1 = 276.0;
+def IWM_l2 = 281.0;
+def IWM_l3 = 277.0;
+def IWM_l4 = 282.0;
+def IWM_pw = 280.0;
+def IWM_vt = 285.0;
+def IWM_zg = 210.0;
+
+# TSLA Values
+def TSLA_cw = 450.0;
+def TSLA_c1 = 450.0;
+def TSLA_c2 = 460.0;
+def TSLA_c3 = 452.5;
+def TSLA_c4 = 455.0;
+def TSLA_l1 = 415.0;
+def TSLA_l2 = 400.0;
+def TSLA_l3 = 410.0;
+def TSLA_l4 = 377.5;
+def TSLA_pw = 440.0;
+def TSLA_vt = 450.0;
+def TSLA_zg = 372.5;
+
+############################################################################################################
+
+if (GetSymbol() == "SPY") {
+    _cw = SPY_cw;
+    _c1 = SPY_c1;
+    _c2 = SPY_c2;
+    _c3 = SPY_c3;
+    _c4 = SPY_c4;
+    _l1 = SPY_l1;
+    _l2 = SPY_l2;
+    _l3 = SPY_l3;
+    _l4 = SPY_l4;
+    _pw = SPY_pw;
+    _vt = SPY_vt;
+    _zg = SPY_zg;
+}
+
+else if (GetSymbol() == "SPX") {
+    _cw = SPX_cw;
+    _c1 = SPX_c1;
+    _c2 = SPX_c2;
+    _c3 = SPX_c3;
+    _c4 = SPX_c4;
+    _l1 = SPX_l1;
+    _l2 = SPX_l2;
+    _l3 = SPX_l3;
+    _l4 = SPX_l4;
+    _pw = SPX_pw;
+    _vt = SPX_vt;
+    _zg = SPX_zg;
+}
+
+else if (GetSymbol() == "XSP") {
+    _cw = XSP_cw;
+    _c1 = XSP_c1;
+    _c2 = XSP_c2;
+    _c3 = XSP_c3;
+    _c4 = XSP_c4;
+    _l1 = XSP_l1;
+    _l2 = XSP_l2;
+    _l3 = XSP_l3;
+    _l4 = XSP_l4;
+    _pw = XSP_pw;
+    _vt = XSP_vt;
+    _zg = XSP_zg;
+}
+
+else if (GetSymbol() == "QQQ") {
+    _cw = QQQ_cw;
+    _c1 = QQQ_c1;
+    _c2 = QQQ_c2;
+    _c3 = QQQ_c3;
+    _c4 = QQQ_c4;
+    _l1 = QQQ_l1;
+    _l2 = QQQ_l2;
+    _l3 = QQQ_l3;
+    _l4 = QQQ_l4;
+    _pw = QQQ_pw;
+    _vt = QQQ_vt;
+    _zg = QQQ_zg;
+}
+
+else if (GetSymbol() == "IWM") {
+    _cw = IWM_cw;
+    _c1 = IWM_c1;
+    _c2 = IWM_c2;
+    _c3 = IWM_c3;
+    _c4 = IWM_c4;
+    _l1 = IWM_l1;
+    _l2 = IWM_l2;
+    _l3 = IWM_l3;
+    _l4 = IWM_l4;
+    _pw = IWM_pw;
+    _vt = IWM_vt;
+    _zg = IWM_zg;
+}
+
+else if (GetSymbol() == "TSLA") {
+    _cw = TSLA_cw;
+    _c1 = TSLA_c1;
+    _c2 = TSLA_c2;
+    _c3 = TSLA_c3;
+    _c4 = TSLA_c4;
+    _l1 = TSLA_l1;
+    _l2 = TSLA_l2;
+    _l3 = TSLA_l3;
+    _l4 = TSLA_l4;
+    _pw = TSLA_pw;
+    _vt = TSLA_vt;
+    _zg = TSLA_zg;
+}
+
+else {
+    _cw = Double.NaN;
+    _c1 = Double.NaN;
+    _c2 = Double.NaN;
+    _c3 = Double.NaN;
+    _c4 = Double.NaN;
+    _l1 = Double.NaN;
+    _l2 = Double.NaN;
+    _l3 = Double.NaN;
+    _l4 = Double.NaN;
+    _pw = Double.NaN;
+    _vt = Double.NaN;
+    _zg = Double.NaN;
+}
+
+plot CallWall = _cw;
+plot ComboL1 = _c1;
+plot ComboL2 = _c2;
+plot ComboL3 = _c3;
+plot ComboL4 = _c4;
+plot L1 = _l1;
+plot L2 = _l2;
+plot L3 = _l3;
+plot L4 = _l4;
+plot PutWall = _pw;
+plot VolTrig = _vt;
+plot ZeroGamma = _zg;
+
+AddChartBubble(!someOff and BarNumber() == HighestAll(x) + 15, ComboL1, "C1", Color.CYAN, no);
+ComboL1.HideTitle();
+ComboL1.SetLineWeight(Line_Weight);
+ComboL1.SetDefaultColor(Color.RED);
+
+AddChartBubble(!someOff and BarNumber() == HighestAll(x) + 15, ComboL2, "C2", Color.CYAN, no);
+ComboL2.HideTitle();
+ComboL2.SetLineWeight(Line_Weight);
+ComboL2.SetDefaultColor(Color.RED);
+
+AddChartBubble(!someOff and BarNumber() == HighestAll(x) + 15, ComboL3, "C3", Color.CYAN, no);
+ComboL3.HideTitle();
+ComboL3.SetLineWeight(Line_Weight);
+ComboL3.SetDefaultColor(Color.RED);
+
+AddChartBubble(!someOff and BarNumber() == HighestAll(x) + 15, ComboL4, "C4", Color.CYAN, no);
+ComboL4.HideTitle();
+ComboL4.SetLineWeight(Line_Weight);
+ComboL4.SetDefaultColor(Color.RED);
+
+AddChartBubble(!someOff and BarNumber() == HighestAll(x) + 15, L1, "L1", Color.GRAY, no);
+L1.HideTitle();
+L1.SetLineWeight(Line_Weight);
+L1.SetDefaultColor(Color.RED);
+
+AddChartBubble(!someOff and BarNumber() == HighestAll(x) + 15, L2, "L2", Color.GRAY, no);
+L2.HideTitle();
+L2.SetLineWeight(Line_Weight);
+L2.SetDefaultColor(Color.RED);
+
+AddChartBubble(!someOff and BarNumber() == HighestAll(x) + 15, L3, "L3", Color.GRAY, no);
+L3.HideTitle();
+L3.SetLineWeight(Line_Weight);
+L3.SetDefaultColor(Color.RED);
+
+AddChartBubble(!someOff and BarNumber() == HighestAll(x) + 15, L4, "L4", Color.GRAY, no);
+L4.HideTitle();
+L4.SetLineWeight(Line_Weight);
+L4.SetDefaultColor(Color.RED);
+
+AddChartBubble(!All_Bubbles_Off and BarNumber() == HighestAll(x) + 10, PutWall, "PW", Color.GREEN, Labels_On_Top);
+PutWall.HideTitle();
+PutWall.SetLineWeight(Line_Weight);
+PutWall.SetDefaultColor(Color.RED);
+
+AddChartBubble(!All_Bubbles_Off and BarNumber() == HighestAll(x) + 10, VolTrig, "VT", Color.LIGHT_ORANGE, Labels_On_Top);
+VolTrig.HideTitle();
+VolTrig.SetLineWeight(Line_Weight);
+VolTrig.SetDefaultColor(Color.RED);
+
+AddChartBubble(!All_Bubbles_Off and BarNumber() == HighestAll(x) + 10, CallWall, "CW", Color.LIGHT_RED, Labels_On_Top);
+CallWall.HideTitle();
+CallWall.SetLineWeight(Line_Weight);
+CallWall.SetDefaultColor(Color.RED);
+
+AddChartBubble(!All_Bubbles_Off and BarNumber() == HighestAll(x) + 10, ZeroGamma, "ZG", Color.WHITE, Labels_On_Top);
+ZeroGamma.HideTitle();
+ZeroGamma.SetLineWeight(Line_Weight);
+ZeroGamma.SetDefaultColor(Color.RED);

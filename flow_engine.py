@@ -1,313 +1,538 @@
-from dotenv import load_dotenv
+# ============================================================
+# flow_engine.py
+# SPY / SPX Options Data Engine - Tradier
+# Pulls Today + Next 2 Expirations
+# Greeks Enabled + Flattened Greeks
+# ============================================================
+
 import os
-from pathlib import Path
 import requests
+import pandas as pd
+from dotenv import load_dotenv
 
-try:
-    import streamlit as st
-except Exception:
-    st = None
+load_dotenv(dotenv_path=".env", override=True)
 
-BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(dotenv_path=BASE_DIR / ".env")
-
-def get_secret(name: str, default=None):
-    value = os.getenv(name)
-    if value:
-        return value
-
-    if st is not None:
-        try:
-            if name in st.secrets:
-                return st.secrets[name]
-        except Exception:
-            pass
-
-    return default
-
-API_KEY = get_secret("TRADIER_API_KEY")
-BASE_URL = get_secret("TRADIER_BASE_URL")
-
-if not API_KEY:
-    raise ValueError("TRADIER_API_KEY is missing. Set it in .env or Streamlit secrets.")
-
-if not BASE_URL:
-    raise ValueError("TRADIER_BASE_URL is missing. Set it in .env or Streamlit secrets.")
+TRADIER_API_KEY = os.getenv("TRADIER_API_KEY")
+TRADIER_BASE_URL = os.getenv("TRADIER_BASE_URL", "https://api.tradier.com/v1")
 
 HEADERS = {
-    "Authorization": f"Bearer {API_KEY}",
+    "Authorization": f"Bearer {TRADIER_API_KEY}",
     "Accept": "application/json"
 }
 
 
-def get_spx_quote():
+# ============================================================
+# SYMBOL MAPPING
+# ============================================================
+
+def get_option_root(symbol):
+    """
+    For SPY, options root is SPY.
+    For SPX, Tradier often uses SPX for expirations/chains.
+    If SPX returns empty chains, change this return to SPXW.
+    """
+    symbol = symbol.upper().strip()
+
+    if symbol == "SPX":
+        return "SPX"
+
+    return symbol
+
+
+# ============================================================
+# TRADIER GET
+# ============================================================
+
+def _tradier_get(endpoint, params=None):
+    if not TRADIER_API_KEY:
+        raise Exception("Missing TRADIER_API_KEY in .env file")
+
+    url = f"{TRADIER_BASE_URL}/{endpoint}"
+
     response = requests.get(
-        f"{BASE_URL}/markets/quotes",
+        url,
         headers=HEADERS,
-        params={"symbols": "SPX"}
+        params=params,
+        timeout=20
     )
-    response.raise_for_status()
-    data = response.json()
-    return data["quotes"]["quote"]["last"]
+
+    if response.status_code != 200:
+        raise Exception(
+            f"Tradier API Error {response.status_code}: {response.text}"
+        )
+
+    return response.json()
 
 
-def get_spx_expirations():
-    response = requests.get(
-        f"{BASE_URL}/markets/options/expirations",
-        headers=HEADERS,
+# ============================================================
+# PRICE
+# ============================================================
+
+def get_price(symbol="SPY"):
+    symbol = symbol.upper().strip()
+
+    data = _tradier_get(
+        "markets/quotes",
+        params={"symbols": symbol}
+    )
+
+    quote = data.get("quotes", {}).get("quote", {})
+
+    if isinstance(quote, list):
+        quote = quote[0] if quote else {}
+
+    for field in ["last", "close", "prevclose", "bid", "ask"]:
+        try:
+            value = float(quote.get(field))
+            if value > 0:
+                return value
+        except Exception:
+            pass
+
+    raise Exception(
+        f"Could not get valid {symbol} price. Quote response: {quote}"
+    )
+
+
+# ============================================================
+# EXPIRATIONS
+# ============================================================
+
+def get_expirations(symbol="SPY"):
+    symbol = symbol.upper().strip()
+    option_root = get_option_root(symbol)
+
+    data = _tradier_get(
+        "markets/options/expirations",
         params={
-            "symbol": "SPX",
-            "includeAllRoots": "true"
+            "symbol": option_root,
+            "includeAllRoots": "true",
+            "strikes": "false"
         }
     )
 
-    print("EXPIRATIONS STATUS:", response.status_code)
-    print("EXPIRATIONS TEXT:", response.text)
-
-    response.raise_for_status()
-    data = response.json()
-
     expirations_block = data.get("expirations")
-    if not expirations_block or not expirations_block.get("date"):
-        return []
 
-    return expirations_block["date"]
+    if expirations_block is None:
+        raise Exception(
+            f"No expirations returned for {option_root}. Raw response: {data}"
+        )
 
+    expirations = expirations_block.get("date", [])
 
-def get_next_spx_expiration():
-    expirations = get_spx_expirations()
+    if isinstance(expirations, str):
+        expirations = [expirations]
+
     if not expirations:
-        raise ValueError("No SPX expirations returned from Tradier.")
+        raise Exception(
+            f"Expiration list empty for {option_root}. Raw response: {data}"
+        )
+
+    return expirations
+
+
+def get_next_expiration(symbol="SPY"):
+    expirations = get_expirations(symbol)
     return expirations[0]
 
 
-def get_spx_chain(expiration, greeks=False):
-    response = requests.get(
-        f"{BASE_URL}/markets/options/chains",
-        headers=HEADERS,
-        params={
-            "symbol": "SPX",
-            "expiration": expiration,
-            "greeks": str(greeks).lower()
-        }
-    )
-    response.raise_for_status()
-    data = response.json()
+# ============================================================
+# GREEKS
+# ============================================================
 
-    options_block = data.get("options")
-    if not options_block or not options_block.get("option"):
-        return []
+def flatten_greeks(df):
+    if "greeks" not in df.columns:
+        return df
 
-    return options_block["option"]
+    def get_greek(row, key):
+        try:
+            g = row.get("greeks", {})
+            if isinstance(g, dict):
+                value = g.get(key)
+                if value is not None:
+                    return value
+        except Exception:
+            pass
 
+        return None
 
-def filter_near_money(options, spot, strike_range=50):
-    filtered = []
-    for contract in options:
-        strike = contract.get("strike")
-        if strike is None:
-            continue
-        if abs(strike - spot) <= strike_range:
-            filtered.append(contract)
-    return filtered
-
-
-def filter_strike_window(options, spot, strikes_above=20, strikes_below=20):
-    unique_strikes = sorted(
-        {contract.get("strike") for contract in options if contract.get("strike") is not None}
-    )
-
-    if not unique_strikes:
-        return []
-
-    closest_index = min(
-        range(len(unique_strikes)),
-        key=lambda i: abs(unique_strikes[i] - spot)
-    )
-
-    start_index = max(0, closest_index - strikes_below)
-    end_index = min(len(unique_strikes), closest_index + strikes_above + 1)
-
-    selected_strikes = set(unique_strikes[start_index:end_index])
-
-    filtered = [
-        contract for contract in options
-        if contract.get("strike") in selected_strikes
-    ]
-
-    return filtered
-
-
-def get_near_money_spx_chain(
-    expiration,
-    strike_range=50,
-    greeks=False,
-    strikes_above=20,
-    strikes_below=20
-):
-    spot = get_spx_quote()
-    contracts = get_spx_chain(expiration, greeks=greeks)
-    filtered = filter_strike_window(
-        contracts,
-        spot,
-        strikes_above=strikes_above,
-        strikes_below=strikes_below
-    )
-    return {
-        "spot": spot,
-        "contracts": filtered,
-        "count": len(filtered)
+    greek_map = {
+        "delta": "delta",
+        "gamma": "gamma",
+        "theta": "theta",
+        "vega": "vega",
+        "rho": "rho",
+        "mid_iv": "iv",
+        "smv_vol": "iv",
+        "iv": "iv",
     }
 
+    for source_key, target_col in greek_map.items():
+        values = df.apply(lambda row: get_greek(row, source_key), axis=1)
 
-def summarize_premium_flow(contracts):
-    call_premium = 0.0
-    put_premium = 0.0
+        if target_col not in df.columns:
+            df[target_col] = values
+        else:
+            df[target_col] = df[target_col].fillna(values)
 
-    for contract in contracts:
-        option_type = contract.get("option_type")
-        last = contract.get("last")
-        volume = contract.get("volume")
+    return df
 
-        if last is None or volume is None:
-            continue
 
-        premium = float(last) * int(volume) * 100
+# ============================================================
+# OPTION CHAIN
+# ============================================================
 
-        if option_type == "call":
-            call_premium += premium
-        elif option_type == "put":
-            put_premium += premium
+def get_option_chain(symbol="SPY", expiration=None):
+    symbol = symbol.upper().strip()
+    option_root = get_option_root(symbol)
 
-    net_premium = call_premium - put_premium
+    if expiration is None:
+        expiration = get_next_expiration(symbol)
+
+    data = _tradier_get(
+        "markets/options/chains",
+        params={
+            "symbol": option_root,
+            "expiration": expiration,
+            "greeks": "true"
+        }
+    )
+
+    options_block = data.get("options")
+
+    if not options_block:
+        print(f"NO OPTIONS BLOCK FOR {option_root} {expiration}. RAW RESPONSE:")
+        print(data)
+        return pd.DataFrame()
+
+    options = options_block.get("option", [])
+
+    if isinstance(options, dict):
+        options = [options]
+
+    if not options:
+        print(f"NO OPTIONS FOUND FOR {option_root} {expiration}. RAW RESPONSE:")
+        print(data)
+        return pd.DataFrame()
+
+    df = pd.DataFrame(options)
+    df = df.loc[:, ~df.columns.duplicated()].copy()
+
+    df = flatten_greeks(df)
+
+    if "option_type" in df.columns:
+        df["type"] = df["option_type"]
+    elif "put_call" in df.columns:
+        df["type"] = df["put_call"]
+    elif "contract_type" in df.columns:
+        df["type"] = df["contract_type"]
+    elif "type" not in df.columns:
+        raise Exception(
+            f"No call/put type column found for {option_root}. "
+            f"Columns: {df.columns.tolist()}"
+        )
+
+    rename_map = {
+        "last_price": "last",
+        "trade_volume": "volume",
+        "open_int": "open_interest",
+        "oi": "open_interest",
+        "expiration_date": "expiration",
+        "exp_date": "expiration",
+        "expiry": "expiration",
+    }
+
+    for old, new in rename_map.items():
+        if old in df.columns and new not in df.columns:
+            df.rename(columns={old: new}, inplace=True)
+
+    if "expiration" not in df.columns:
+        df["expiration"] = expiration
+
+    required_cols = ["strike", "type", "volume"]
+    missing = [col for col in required_cols if col not in df.columns]
+
+    if missing:
+        raise Exception(
+            f"Missing required columns for {option_root}: {missing}. "
+            f"Available columns: {df.columns.tolist()}"
+        )
+
+    df["type"] = (
+        df["type"]
+        .astype(str)
+        .str.lower()
+        .str.strip()
+        .replace({
+            "calls": "call",
+            "puts": "put",
+            "c": "call",
+            "p": "put"
+        })
+    )
+
+    if "last" not in df.columns:
+        if "bid" in df.columns and "ask" in df.columns:
+            df["last"] = (
+                pd.to_numeric(df["bid"], errors="coerce").fillna(0)
+                + pd.to_numeric(df["ask"], errors="coerce").fillna(0)
+            ) / 2
+        else:
+            df["last"] = 0
+
+    if "open_interest" not in df.columns:
+        df["open_interest"] = 0
+
+    for col in [
+        "strike",
+        "last",
+        "volume",
+        "open_interest",
+        "bid",
+        "ask",
+        "delta",
+        "gamma",
+        "theta",
+        "vega",
+        "rho",
+        "iv",
+    ]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(
+                df[col],
+                errors="coerce"
+            ).fillna(0)
+
+    df = df.dropna(subset=["strike"])
+    df = df[df["type"].isin(["call", "put"])]
+
+    if df.empty:
+        print(f"DATAFRAME EMPTY AFTER CALL/PUT FILTER FOR {option_root} {expiration}.")
+        return pd.DataFrame()
+
+    df["symbol_root"] = option_root
+    df["display_symbol"] = symbol
+    df["expiration"] = str(expiration)
+    df["premium"] = df["last"] * df["volume"] * 100
+
+    keep_cols = [
+        "symbol",
+        "symbol_root",
+        "display_symbol",
+        "description",
+        "expiration",
+        "strike",
+        "type",
+        "bid",
+        "ask",
+        "last",
+        "volume",
+        "open_interest",
+        "delta",
+        "gamma",
+        "theta",
+        "vega",
+        "rho",
+        "iv",
+        "premium",
+    ]
+
+    existing_cols = [c for c in keep_cols if c in df.columns]
+    extra_cols = [
+        c for c in df.columns
+        if c not in existing_cols and c != "greeks"
+    ]
+
+    return df[existing_cols + extra_cols]
+
+
+# ============================================================
+# FILTER / SUMMARY
+# ============================================================
+
+def filter_near_money(df, spot_price, width=10, min_strikes=9):
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    spot_price = float(spot_price)
+
+    filtered = df[
+        (df["strike"] >= spot_price - width)
+        & (df["strike"] <= spot_price + width)
+    ].copy()
+
+    if filtered.empty or filtered["strike"].nunique() < min_strikes:
+        expanded_width = width * 2
+
+        filtered = df[
+            (df["strike"] >= spot_price - expanded_width)
+            & (df["strike"] <= spot_price + expanded_width)
+        ].copy()
+
+    return filtered
+
+
+def summarize_flow(df):
+    if df is None or df.empty:
+        return {
+            "call_premium": 0,
+            "put_premium": 0,
+            "net_premium": 0,
+            "call_volume": 0,
+            "put_volume": 0
+        }
+
+    calls = df[df["type"] == "call"]
+    puts = df[df["type"] == "put"]
+
+    call_premium = calls["premium"].sum()
+    put_premium = puts["premium"].sum()
+    call_volume = calls["volume"].sum()
+    put_volume = puts["volume"].sum()
 
     return {
         "call_premium": call_premium,
         "put_premium": put_premium,
-        "net_premium": net_premium
+        "net_premium": call_premium - put_premium,
+        "call_volume": call_volume,
+        "put_volume": put_volume
     }
 
 
-def summarize_premium_by_strike(contracts):
-    strike_map = {}
+# ============================================================
+# MAIN DATA FUNCTION
+# ============================================================
 
-    for contract in contracts:
-        strike = contract.get("strike")
-        option_type = contract.get("option_type")
-        last = contract.get("last")
-        volume = contract.get("volume")
+def get_spx_flow_data(symbol="SPY", width=10):
+    """
+    Name kept so existing dashboard imports do not break.
 
-        if strike is None or last is None or volume is None:
-            continue
+    Supports:
+    - SPY
+    - SPX
 
-        premium = float(last) * int(volume) * 100
+    Pulls:
+    - Today expiration
+    - Next expiration
+    - Third expiration
+    """
 
-        if strike not in strike_map:
-            strike_map[strike] = {
-                "call_premium": 0.0,
-                "put_premium": 0.0,
-                "total_premium": 0.0
-            }
+    symbol = symbol.upper().strip()
+    option_root = get_option_root(symbol)
 
-        if option_type == "call":
-            strike_map[strike]["call_premium"] += premium
-        elif option_type == "put":
-            strike_map[strike]["put_premium"] += premium
+    spot_price = get_price(symbol)
 
-        strike_map[strike]["total_premium"] += premium
+    expirations = get_expirations(symbol)[:3]
 
-    return strike_map
+    chains = []
 
+    for exp in expirations:
+        temp_chain = get_option_chain(symbol, exp)
 
-def summarize_gamma_by_strike(contracts):
-    strike_map = {}
+        if temp_chain is not None and not temp_chain.empty:
+            temp_chain["expiration"] = str(exp)
+            chains.append(temp_chain)
 
-    for contract in contracts:
-        strike = contract.get("strike")
-        option_type = contract.get("option_type")
-        open_interest = contract.get("open_interest")
+    if not chains:
+        raise Exception(
+            f"No option chains returned. "
+            f"Symbol={symbol}, OptionRoot={option_root}, "
+            f"Spot={spot_price}, Expirations={expirations}"
+        )
 
-        greeks = contract.get("greeks") or {}
-        gamma = greeks.get("gamma")
+    chain_df = pd.concat(
+        chains,
+        ignore_index=True
+    )
 
-        if strike is None or gamma is None or open_interest is None:
-            continue
+    chain_df = filter_near_money(
+        chain_df,
+        spot_price,
+        width=width
+    )
 
-        gamma_exposure = float(gamma) * int(open_interest) * 100
+    if chain_df is None or chain_df.empty:
+        raise Exception(
+            f"Option chain returned empty dataframe after near-money filter. "
+            f"Symbol={symbol}, OptionRoot={option_root}, "
+            f"Spot={spot_price}, Expirations={expirations}"
+        )
 
-        if strike not in strike_map:
-            strike_map[strike] = {
-                "call_gamma": 0.0,
-                "put_gamma": 0.0,
-                "total_gamma": 0.0
-            }
-
-        if option_type == "call":
-            strike_map[strike]["call_gamma"] += gamma_exposure
-        elif option_type == "put":
-            strike_map[strike]["put_gamma"] += gamma_exposure
-
-        strike_map[strike]["total_gamma"] += abs(gamma_exposure)
-
-    return strike_map
-
-
-def identify_key_levels(strike_summary):
-    top_call = None
-    top_put = None
-    strongest_net = None
-
-    max_call = 0
-    max_put = 0
-    max_net = 0
-
-    for strike, data in strike_summary.items():
-        call_prem = data["call_premium"]
-        put_prem = data["put_premium"]
-        net = call_prem - put_prem
-
-        if call_prem > max_call:
-            max_call = call_prem
-            top_call = strike
-
-        if put_prem > max_put:
-            max_put = put_prem
-            top_put = strike
-
-        if abs(net) > max_net:
-            max_net = abs(net)
-            strongest_net = (strike, net)
+    flow_summary = summarize_flow(chain_df)
 
     return {
-        "top_call_strike": top_call,
-        "top_put_strike": top_put,
-        "strongest_net_strike": strongest_net
+        "symbol": symbol,
+        "option_root": option_root,
+        "spot_price": spot_price,
+        "expiration": expirations[0],
+        "expirations": expirations,
+        "chain_df": chain_df,
+        "flow_summary": flow_summary
     }
 
 
-def generate_trade_signal(spot, summary, levels):
-    net = summary["net_premium"]
+# ============================================================
+# TEST
+# ============================================================
 
-    top_call = levels["top_call_strike"]
-    top_put = levels["top_put_strike"]
-    net_strike, net_value = levels["strongest_net_strike"]
+if __name__ == "__main__":
+    test_symbol = os.getenv("TEST_SYMBOL", "SPY").upper().strip()
 
-    if net > 0:
-        bias = "BULLISH"
-    elif net < 0:
-        bias = "BEARISH"
-    else:
-        bias = "NEUTRAL"
+    print("Testing flow_engine.py...")
+    print(f"Symbol: {test_symbol}")
+    print(f"Option Root: {get_option_root(test_symbol)}")
 
-    if bias == "BULLISH" and top_call is not None and spot > top_call:
-        signal = "LONG"
-    elif bias == "BEARISH" and top_put is not None and spot < top_put:
-        signal = "SHORT"
-    else:
-        signal = "WAIT"
+    print("Price:")
+    print(get_price(test_symbol))
 
-    return {
-        "bias": bias,
-        "signal": signal,
-        "target": net_strike
-    }
+    print("Expirations:")
+    expirations = get_expirations(test_symbol)
+    print(expirations[:5])
+
+    print("Using first 3 expirations:")
+    print(expirations[:3])
+
+    data = get_spx_flow_data(
+        symbol=test_symbol,
+        width=150
+    )
+
+    chain = data["chain_df"]
+
+    print("Chain rows:")
+    print(len(chain))
+
+    print("Expirations in dataframe:")
+    print(chain["expiration"].unique())
+
+    print("Unique option types:")
+    print(chain["type"].unique())
+
+    print("Columns:")
+    print(chain.columns.tolist())
+
+    print("Greek sample:")
+    print(
+        chain[
+            [
+                c for c in [
+                    "display_symbol",
+                    "symbol_root",
+                    "expiration",
+                    "strike",
+                    "type",
+                    "delta",
+                    "gamma",
+                    "theta",
+                    "vega",
+                    "iv",
+                    "open_interest",
+                    "volume",
+                ]
+                if c in chain.columns
+            ]
+        ].head()
+    )
+
+    print("Head:")
+    print(chain.head())

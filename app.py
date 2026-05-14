@@ -1,448 +1,823 @@
+# ============================================================
+# app.py
+# Options Flow Dashboard + Flow + Gamma + A+ + Tr3ndy
+# + Trade Plan + Discord + Morning Snapshot
+# + Intraday Gamma + Expected Move
+# ============================================================
+
+import os
+import time
 import streamlit as st
-import pandas as pd
-from datetime import datetime
-from zoneinfo import ZoneInfo
+
 from streamlit_autorefresh import st_autorefresh
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
-from flow_engine import (
-    get_near_money_spx_chain,
-    summarize_premium_flow,
-    summarize_premium_by_strike,
-    identify_key_levels,
-    generate_trade_signal,
-    get_next_spx_expiration
+from flow_engine import get_spx_flow_data
+from flow_scoring import score_options_flow, format_flow_alert
+from gamma_engine import get_oi_levels, get_gamma_bias
+
+from gamma_level_engine import (
+    build_gamma_delta_levels,
+    format_gamma_delta_levels,
+    build_gamma_curve_chart,
+    determine_gamma_regime
 )
 
-st.set_page_config(page_title="SPX Flow Dashboard", layout="wide")
-
-SPIKE_THRESHOLD = 5_000_000
-PROXIMITY_THRESHOLD = 5
-STRIKES_ABOVE = 10
-STRIKES_BELOW = 10
-PRICE_VIEW_RANGE = 30
-EXPIRATION = get_next_spx_expiration()
-
-CHART_WINDOW_MINUTES = 60
-BAR_INTERVAL = "3min"
-
-st.title("SPX 0DTE Flow Dashboard")
-st_autorefresh(interval=10000, key="flow_refresh")
-
-if "prior_net_premium" not in st.session_state:
-    st.session_state["prior_net_premium"] = None
-
-if "flow_history" not in st.session_state:
-    st.session_state["flow_history"] = []
-
-# ---------------------------------------------------------
-# MARKET STATUS
-# ---------------------------------------------------------
-now = datetime.now(ZoneInfo("America/Chicago"))
-current_time = now.time()
-weekday = now.weekday()
-
-is_weekday = weekday < 5
-
-market_open = (
-    is_weekday
-    and current_time >= datetime.strptime("08:30", "%H:%M").time()
-    and current_time <= datetime.strptime("15:00", "%H:%M").time()
+from intraday_gamma_engine import (
+    update_intraday_gamma_state,
+    build_intraday_gamma_report
 )
 
-market_status = "OPEN" if market_open else "CLOSED"
+from expected_move_engine import build_expected_move
 
-# ---------------------------------------------------------
+from a_plus_engine import compute_a_plus_score
+from alerts import send_discord_alert
+from trendy_edges_engine import get_trendy_edges, format_trendy_edges
+from chart_engine import build_trendy_levels_chart
+from trade_plan_engine import build_trade_plan, format_trade_plan
+from snapshot_engine import build_morning_snapshot
+
+
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
+
+def is_near_level(price, level, pct=0.002):
+    try:
+        if level is None:
+            return False
+        return abs(float(price) - float(level)) <= float(price) * pct
+    except Exception:
+        return False
+
+
+def fmt(value):
+    try:
+        if value is None:
+            return "—"
+        return f"{float(value):,.2f}"
+    except Exception:
+        return "—"
+
+
+def fmt_money(value):
+    try:
+        value = float(value)
+        if abs(value) >= 1_000_000:
+            return f"${value / 1_000_000:.2f}M"
+        if abs(value) >= 1_000:
+            return f"${value / 1_000:.1f}K"
+        return f"${value:,.0f}"
+    except Exception:
+        return "—"
+
+
+# ============================================================
+# PAGE SETTINGS
+# ============================================================
+
+st.set_page_config(
+    page_title="Options Flow Dashboard",
+    page_icon="📊",
+    layout="wide"
+)
+
+st.title("📊 Options Flow Dashboard")
+st.caption("Manual trade-decision support only — not auto-trading.")
+
+
+# ============================================================
+# SIDEBAR SETTINGS
+# ============================================================
+
+st.sidebar.header("Settings")
+
+auto_refresh = st.sidebar.checkbox("Auto Refresh", value=True)
+
+refresh_seconds = st.sidebar.selectbox(
+    "Refresh Interval",
+    options=[15, 30, 60, 120, 300],
+    index=2
+)
+
+near_money_width = st.sidebar.slider(
+    "Near-Money Strike Width",
+    min_value=5,
+    max_value=150,
+    value=10,
+    step=5
+)
+
+atm_width = st.sidebar.slider(
+    "ATM Width",
+    min_value=5,
+    max_value=50,
+    value=10,
+    step=5
+)
+
+min_volume = st.sidebar.slider(
+    "Minimum Option Volume",
+    min_value=0,
+    max_value=100,
+    value=1,
+    step=1
+)
+
+send_discord = st.sidebar.checkbox("Send Discord Alerts", value=True)
+
+alert_level = st.sidebar.selectbox(
+    "Discord Alert Level",
+    ["A+ Only", "A+ & B+", "All Signals"],
+    index=0
+)
+
+if auto_refresh:
+    st_autorefresh(
+        interval=refresh_seconds * 1000,
+        key="flow_refresh"
+    )
+
+
+# ============================================================
 # LOAD DATA
-# ---------------------------------------------------------
-result = get_near_money_spx_chain(
-    expiration=EXPIRATION,
-    greeks=True,
-    strikes_above=STRIKES_ABOVE,
-    strikes_below=STRIKES_BELOW
-)
+# ============================================================
 
-summary = summarize_premium_flow(result["contracts"])
-strike_summary = summarize_premium_by_strike(result["contracts"])
-levels = identify_key_levels(strike_summary)
+chain_df = None
+spot_price = None
+expiration = None
+symbol = "SPY"
 
-signal = generate_trade_signal(
-    spot=result["spot"],
-    summary=summary,
-    levels=levels
-)
+try:
+    data = get_spx_flow_data(width=near_money_width)
 
-# ---------------------------------------------------------
-# FLOW ACCELERATION / SPIKE
-# ---------------------------------------------------------
-current_net = summary["net_premium"]
-prior_net = st.session_state["prior_net_premium"]
+    symbol = data.get("symbol", "SPY")
+    spot_price = data["spot_price"]
+    expiration = data["expiration"]
+    chain_df = data["chain_df"]
 
-if prior_net is None:
-    net_change = 0.0
-else:
-    net_change = current_net - prior_net
+except Exception as e:
+    st.error("Failed to load options flow data.")
+    st.exception(e)
 
-st.session_state["prior_net_premium"] = current_net
+if chain_df is None or chain_df.empty:
+    st.warning("No option chain data returned.")
+    st.stop()
 
-if net_change > 0:
-    acceleration_label = "BULLISH"
-elif net_change < 0:
-    acceleration_label = "BEARISH"
-else:
-    acceleration_label = "FLAT"
 
-if net_change >= SPIKE_THRESHOLD:
-    spike_label = "BULLISH SPIKE"
-elif net_change <= -SPIKE_THRESHOLD:
-    spike_label = "BEARISH SPIKE"
-else:
-    spike_label = "NO SPIKE"
+# ============================================================
+# SCORE FLOW + GAMMA + A+ + TR3NDY + TRADE PLAN
+# ============================================================
 
-# ---------------------------------------------------------
-# PROXIMITY
-# ---------------------------------------------------------
-top_call_strike = levels["top_call_strike"]
-top_put_strike = levels["top_put_strike"]
-spot = result["spot"]
-
-near_call_strike = abs(spot - top_call_strike) <= PROXIMITY_THRESHOLD
-near_put_strike = abs(spot - top_put_strike) <= PROXIMITY_THRESHOLD
-
-if near_call_strike and near_put_strike:
-    proximity_label = "Near top call + put"
-elif near_call_strike:
-    proximity_label = f"Near call {top_call_strike}"
-elif near_put_strike:
-    proximity_label = f"Near put {top_put_strike}"
-else:
-    proximity_label = "Not near key strike"
-
-# ---------------------------------------------------------
-# STORE HISTORY FOR FLOW CHART
-# ---------------------------------------------------------
-history_row = {
-    "timestamp": now.replace(tzinfo=None),
-    "spx_price": float(result["spot"]),
-    "call_premium": float(summary["call_premium"]),
-    "put_premium": float(summary["put_premium"]),
-    "net_premium": float(summary["net_premium"]),
-}
-
-existing_history = st.session_state["flow_history"]
-
-if not existing_history or existing_history[-1]["timestamp"] != history_row["timestamp"]:
-    existing_history.append(history_row)
-
-st.session_state["flow_history"] = existing_history[-300:]
-
-history_df = pd.DataFrame(st.session_state["flow_history"])
-
-# ---------------------------------------------------------
-# COMPACT HEADER
-# ---------------------------------------------------------
-st.caption(
-    f"Updated: {now.strftime('%Y-%m-%d %H:%M:%S')} CT | "
-    f"Exp: {EXPIRATION} | Market: {market_status}"
-)
-
-# ---------------------------------------------------------
-# TOP SECTION: SUMMARY LEFT / FLOW CHART RIGHT
-# ---------------------------------------------------------
-top_left, top_right = st.columns([1, 1.6])
-
-with top_left:
-    c1, c2 = st.columns(2)
-    c3, c4 = st.columns(2)
-    c5, c6 = st.columns(2)
-
-    c1.metric("SPX", f"{result['spot']}")
-    c2.metric("Net Premium", f"${summary['net_premium']:,.0f}")
-    c3.metric("Net Change", f"${net_change:,.0f}")
-    c4.metric("Bias", signal["bias"])
-    c5.metric("Action", signal["signal"])
-    c6.metric("Spike", spike_label)
-
-    st.markdown(
-        f"""
-        <div style="
-            margin-top:8px;
-            padding:10px;
-            border-radius:10px;
-            background-color:#1f2937;
-            color:white;
-            font-size:14px;
-        ">
-            <b>Acceleration:</b> {acceleration_label}<br>
-            <b>Proximity:</b> {proximity_label}<br>
-            <b>Top Call:</b> {levels['top_call_strike']} &nbsp; | &nbsp;
-            <b>Top Put:</b> {levels['top_put_strike']} &nbsp; | &nbsp;
-            <b>Target:</b> {signal['target']}<br>
-            <b>Chart Window:</b> 1h &nbsp; | &nbsp;
-            <b>Bar Size:</b> 3min
-        </div>
-        """,
-        unsafe_allow_html=True
+try:
+    flow_result = score_options_flow(
+        df=chain_df,
+        spot_price=spot_price,
+        near_money_width=near_money_width,
+        atm_width=atm_width,
+        min_volume=min_volume
     )
 
-with top_right:
-    st.subheader(
-        f"SPX Price vs Call / Put Buying (3min Bars | Last 1 Hour) | "
-        f"Calls ${summary['call_premium']:,.0f} | Puts ${summary['put_premium']:,.0f}"
+    oi_levels = get_oi_levels(chain_df)
+    gamma_bias = get_gamma_bias(chain_df, spot_price)
+
+    gamma_delta_result = build_gamma_delta_levels(chain_df, spot_price)
+    gamma_delta_text = format_gamma_delta_levels(gamma_delta_result)
+    gamma_delta_levels = gamma_delta_result.get("levels", {})
+    gamma_delta_detail = gamma_delta_result.get("detail")
+
+    gamma_regime = determine_gamma_regime(gamma_delta_levels)
+
+    expected_move = build_expected_move(
+        chain_df,
+        spot_price
     )
 
-    if not history_df.empty and len(history_df) >= 2:
-        chart_df = history_df.copy()
-        chart_df["timestamp"] = pd.to_datetime(chart_df["timestamp"])
-        chart_df = chart_df.sort_values("timestamp")
-        chart_df = chart_df.set_index("timestamp")
+    intraday_state = update_intraday_gamma_state(
+        gamma_delta_levels
+    )
 
-        chart_bars = (
-            chart_df
-            .resample(BAR_INTERVAL)
-            .last()
-            .ffill()
-            .dropna()
-            .reset_index()
-        )
+    intraday_gamma = build_intraday_gamma_report(
+        intraday_state
+    )
 
-        if len(chart_bars) >= 2:
-            latest_ts = chart_bars["timestamp"].max()
-            cutoff = latest_ts - pd.Timedelta(minutes=CHART_WINDOW_MINUTES)
-            chart_bars = chart_bars[chart_bars["timestamp"] >= cutoff]
+    a_plus = compute_a_plus_score(
+        flow_result=flow_result,
+        gamma_bias=gamma_bias,
+        spot_price=spot_price,
+        oi_levels=oi_levels
+    )
 
-            if len(chart_bars) >= 2:
-                chart_bars["net_change"] = chart_bars["net_premium"].diff().fillna(0)
+    trendy_edges = get_trendy_edges(symbol)
+    trendy_text = format_trendy_edges(trendy_edges)
 
-                bull_spikes = chart_bars[chart_bars["net_change"] >= SPIKE_THRESHOLD]
-                bear_spikes = chart_bars[chart_bars["net_change"] <= -SPIKE_THRESHOLD]
+    trendy_chart = build_trendy_levels_chart(
+        symbol=symbol,
+        spot_price=spot_price,
+        trendy_edges=trendy_edges,
+        gamma_levels=gamma_delta_levels,
+        expected_move=expected_move
+    )
 
-                chart = make_subplots(specs=[[{"secondary_y": True}]])
+    trade_plan = build_trade_plan(
+        symbol=symbol,
+        spot_price=spot_price,
+        a_plus=a_plus,
+        flow_result=flow_result,
+        trendy_edges=trendy_edges
+    )
 
-                chart.add_trace(
-                    go.Scatter(
-                        x=chart_bars["timestamp"],
-                        y=chart_bars["spx_price"],
-                        mode="lines",
-                        name="SPX Price",
-                        line=dict(color="white", width=3),
-                        connectgaps=True
-                    ),
-                    secondary_y=False
-                )
+    trade_plan_text = format_trade_plan(trade_plan)
 
-                chart.add_trace(
-                    go.Scatter(
-                        x=chart_bars["timestamp"],
-                        y=chart_bars["call_premium"],
-                        mode="lines",
-                        name="Calls",
-                        line=dict(color="orange", width=3),
-                        connectgaps=True
-                    ),
-                    secondary_y=True
-                )
+    morning_snapshot = build_morning_snapshot(
+        symbol=symbol,
+        spot_price=spot_price,
+        expiration=expiration,
+        flow_result=flow_result,
+        gamma_delta_levels=gamma_delta_levels,
+        gamma_regime=gamma_regime,
+        trendy_edges=trendy_edges,
+        trade_plan=trade_plan,
+        a_plus=a_plus,
+    )
 
-                chart.add_trace(
-                    go.Scatter(
-                        x=chart_bars["timestamp"],
-                        y=chart_bars["put_premium"],
-                        mode="lines",
-                        name="Puts",
-                        line=dict(color="dodgerblue", width=3),
-                        connectgaps=True
-                    ),
-                    secondary_y=True
-                )
+except Exception as e:
+    st.error("Scoring / Gamma / Tr3ndy / Trade Plan error.")
+    st.exception(e)
+    st.stop()
 
-                if not bull_spikes.empty:
-                    chart.add_trace(
-                        go.Scatter(
-                            x=bull_spikes["timestamp"],
-                            y=bull_spikes["call_premium"],
-                            mode="markers+text",
-                            name="Bull Spike",
-                            marker=dict(color="lime", size=10),
-                            text=["Bull"] * len(bull_spikes),
-                            textposition="top center",
-                            textfont=dict(color="lime", size=11),
-                            connectgaps=True
-                        ),
-                        secondary_y=True
-                    )
 
-                if not bear_spikes.empty:
-                    chart.add_trace(
-                        go.Scatter(
-                            x=bear_spikes["timestamp"],
-                            y=bear_spikes["put_premium"],
-                            mode="markers+text",
-                            name="Bear Spike",
-                            marker=dict(color="cyan", size=10),
-                            text=["Bear"] * len(bear_spikes),
-                            textposition="top center",
-                            textfont=dict(color="cyan", size=11),
-                            connectgaps=True
-                        ),
-                        secondary_y=True
-                    )
+# ============================================================
+# COMPACT TRADER COCKPIT
+# ============================================================
 
-                session_open = pd.Timestamp(now.date()) + pd.Timedelta(hours=8, minutes=30)
-                chart.add_vline(
-                    x=session_open,
-                    line_width=1,
-                    line_dash="dot",
-                    line_color="gray"
-                )
+summary = flow_result.get("summary", {})
 
-                latest_call = float(chart_bars["call_premium"].iloc[-1])
-                latest_put = float(chart_bars["put_premium"].iloc[-1])
-                latest_x = chart_bars["timestamp"].iloc[-1]
+top_call = summary.get("top_call_strike")
+top_put = summary.get("top_put_strike")
 
-                chart.add_annotation(
-                    x=latest_x,
-                    y=latest_call,
-                    xref="x",
-                    yref="y2",
-                    text=f"Calls: ${latest_call:,.0f}",
-                    showarrow=False,
-                    xanchor="left",
-                    yanchor="middle",
-                    xshift=40,
-                    font=dict(color="orange", size=12),
-                    bgcolor="rgba(0,0,0,0.55)",
-                    bordercolor="orange",
-                    borderwidth=1
-                )
+near_call_target = is_near_level(spot_price, top_call)
+near_put_target = is_near_level(spot_price, top_put)
 
-                chart.add_annotation(
-                    x=latest_x,
-                    y=latest_put,
-                    xref="x",
-                    yref="y2",
-                    text=f"Puts: ${latest_put:,.0f}",
-                    showarrow=False,
-                    xanchor="left",
-                    yanchor="middle",
-                    xshift=40,
-                    font=dict(color="dodgerblue", size=12),
-                    bgcolor="rgba(0,0,0,0.55)",
-                    bordercolor="dodgerblue",
-                    borderwidth=1
-                )
+daily = trendy_edges.get("daily", {})
+weekly = trendy_edges.get("weekly", {})
 
-                price_min = result["spot"] - PRICE_VIEW_RANGE
-                price_max = result["spot"] + PRICE_VIEW_RANGE
+near_demand = (
+    is_near_level(spot_price, daily.get("demand"))
+    or is_near_level(spot_price, weekly.get("demand"))
+)
 
-                chart.update_layout(
-                    height=420,
-                    margin=dict(l=20, r=110, t=20, b=20),
-                    paper_bgcolor="#0b1220",
-                    plot_bgcolor="#0b1220",
-                    font=dict(color="white"),
-                    hovermode="x unified",
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="left",
-                        x=0
-                    ),
-                    xaxis=dict(
-                        title="Time",
-                        showgrid=True,
-                        gridcolor="rgba(255,255,255,0.08)",
-                        rangeslider=dict(visible=True)
-                    ),
-                    yaxis=dict(
-                        title="SPX Price",
-                        range=[price_min, price_max],
-                        showgrid=True,
-                        gridcolor="rgba(255,255,255,0.08)",
-                        zeroline=False
-                    ),
-                    yaxis2=dict(
-                        title="Premium",
-                        showgrid=False,
-                        zeroline=False
-                    ),
-                )
+near_supply = (
+    is_near_level(spot_price, daily.get("supply"))
+    or is_near_level(spot_price, weekly.get("supply"))
+)
 
-                st.plotly_chart(
-                    chart,
-                    use_container_width=True,
-                    config={
-                        "displayModeBar": True,
-                        "scrollZoom": True
-                    }
-                )
-            else:
-                st.info("Not enough data in the last hour yet.")
+call_premium = summary.get("call_premium", 0)
+put_premium = summary.get("put_premium", 0)
+net_premium = summary.get("net_premium", 0)
+
+st.subheader("⚡ Trader Cockpit")
+
+c1, c2, c3, c4, c5, c6 = st.columns(6)
+
+c1.metric(f"{symbol}", fmt(spot_price))
+c2.metric("Signal", a_plus.get("grade", "NEUTRAL"))
+c3.metric("Score", a_plus.get("score", 0))
+c4.metric("Flow Bias", flow_result.get("bias", "NEUTRAL"))
+c5.metric("Top Call Target", fmt(top_call))
+c6.metric("Top Put Target", fmt(top_put))
+
+c1, c2, c3, c4, c5, c6 = st.columns(6)
+
+c1.metric("Net Premium", fmt_money(net_premium))
+c2.metric("Call Prem", fmt_money(call_premium))
+c3.metric("Put Prem", fmt_money(put_premium))
+c4.metric("Entry", fmt(trade_plan.get("entry")))
+c5.metric("Stop", fmt(trade_plan.get("stop")))
+c6.metric("Target 1", fmt(trade_plan.get("target_1")))
+
+
+# ============================================================
+# MORNING GAMMA / DELTA LEVELS
+# ============================================================
+
+st.write("### 🧠 Morning Gamma / Delta Levels")
+
+if gamma_delta_result.get("error"):
+    st.warning(gamma_delta_result.get("error"))
+else:
+    g1, g2, g3, g4, g5 = st.columns(5)
+
+    g1.metric("Call Wall", fmt(gamma_delta_levels.get("call_wall")))
+    g2.metric("Put Wall", fmt(gamma_delta_levels.get("put_wall")))
+    g3.metric("Zero Gamma", fmt(gamma_delta_levels.get("zero_gamma")))
+    g4.metric("Vol Trigger", fmt(gamma_delta_levels.get("vol_trigger")))
+    g5.metric("Magnet", fmt(gamma_delta_levels.get("magnet")))
+
+    g1, g2, g3, g4 = st.columns(4)
+
+    g1.metric("C1", fmt(gamma_delta_levels.get("c1")))
+    g2.metric("C2", fmt(gamma_delta_levels.get("c2")))
+    g3.metric("L1", fmt(gamma_delta_levels.get("l1")))
+    g4.metric("L2", fmt(gamma_delta_levels.get("l2")))
+
+
+# ============================================================
+# DEALER GAMMA REGIME
+# ============================================================
+
+st.write("### 🌐 Dealer Gamma Regime")
+
+r1, r2, r3 = st.columns(3)
+
+r1.metric("Gamma Regime", gamma_regime.get("regime"))
+r2.metric("Expected Behavior", gamma_regime.get("behavior"))
+r3.metric("Net GEX", fmt_money(gamma_regime.get("net_gex")))
+
+st.info(gamma_regime.get("bias"))
+
+if gamma_regime.get("odte_note"):
+    st.caption(gamma_regime.get("odte_note"))
+
+
+# ============================================================
+# INTRADAY GAMMA SHIFT
+# ============================================================
+
+st.write("### 🔄 Intraday Gamma Shift")
+
+i1, i2, i3 = st.columns(3)
+
+i1.metric("Open GEX", fmt_money(intraday_gamma.get("open_gex")))
+i2.metric("Current GEX", fmt_money(intraday_gamma.get("current_gex")))
+i3.metric("GEX Shift", fmt_money(intraday_gamma.get("gex_shift")))
+
+i1, i2 = st.columns(2)
+
+i1.metric(
+    "Call Wall Shift",
+    f'{fmt(intraday_gamma.get("open_call_wall"))} → {fmt(intraday_gamma.get("current_call_wall"))}'
+)
+
+i2.metric(
+    "Put Wall Shift",
+    f'{fmt(intraday_gamma.get("open_put_wall"))} → {fmt(intraday_gamma.get("current_put_wall"))}'
+)
+
+i1, i2 = st.columns(2)
+
+i1.metric(
+    "Zero Gamma Shift",
+    f'{fmt(intraday_gamma.get("open_zero_gamma"))} → {fmt(intraday_gamma.get("current_zero_gamma"))}'
+)
+
+i2.metric(
+    "Vol Trigger Shift",
+    f'{fmt(intraday_gamma.get("open_vol_trigger"))} → {fmt(intraday_gamma.get("current_vol_trigger"))}'
+)
+
+gex_shift = intraday_gamma.get("gex_shift", 0)
+
+try:
+    gex_shift = float(gex_shift)
+except Exception:
+    gex_shift = 0
+
+if gex_shift > 5_000_000:
+    st.success(
+        "Dealers are adding positive gamma intraday. "
+        "Pinning / mean reversion strengthening."
+    )
+
+elif gex_shift < -5_000_000:
+    st.error(
+        "Dealers are becoming more short gamma intraday. "
+        "Trend / expansion risk increasing."
+    )
+
+else:
+    st.info("No major intraday gamma regime shift detected.")
+
+
+# ============================================================
+# EXPECTED MOVE
+# ============================================================
+
+st.write("### 📦 Expected Move")
+
+if expected_move.get("error"):
+    st.warning(expected_move.get("error"))
+
+else:
+    e1, e2, e3, e4 = st.columns(4)
+
+    e1.metric("ATM Strike", fmt(expected_move.get("atm_strike")))
+    e2.metric("Expected Move", fmt(expected_move.get("expected_move")))
+    e3.metric("Upper Expected", fmt(expected_move.get("upper")))
+    e4.metric("Lower Expected", fmt(expected_move.get("lower")))
+
+    st.caption(
+        f'Expected Move %: {expected_move.get("expected_move_pct", 0):.2f}%'
+    )
+
+    cw = gamma_delta_levels.get("call_wall")
+    pw = gamma_delta_levels.get("put_wall")
+
+    upper_em = expected_move.get("upper")
+    lower_em = expected_move.get("lower")
+
+    try:
+        if (
+            cw is not None
+            and upper_em is not None
+            and float(cw) > float(upper_em)
+        ):
+            st.success(
+                "Call Wall sits ABOVE expected move. "
+                "Upside dealer resistance may be harder to reach."
+            )
+
+        if (
+            pw is not None
+            and lower_em is not None
+            and float(pw) < float(lower_em)
+        ):
+            st.success(
+                "Put Wall sits BELOW expected move. "
+                "Downside dealer support may contain movement."
+            )
+
+        if (
+            cw is not None
+            and upper_em is not None
+            and abs(float(cw) - float(upper_em)) < 5
+        ):
+            st.warning(
+                "Call Wall aligns closely with Expected Move HIGH."
+            )
+
+        if (
+            pw is not None
+            and lower_em is not None
+            and abs(float(pw) - float(lower_em)) < 5
+        ):
+            st.warning(
+                "Put Wall aligns closely with Expected Move LOW."
+            )
+
+    except Exception:
+        pass
+
+
+# ============================================================
+# GAMMA CURVE CHART
+# ============================================================
+
+gamma_curve_chart = build_gamma_curve_chart(
+    gamma_delta_result,
+    spot_price
+)
+
+if gamma_curve_chart is not None:
+    st.write("### 📈 Gamma Curve")
+    st.plotly_chart(gamma_curve_chart, use_container_width=True)
+
+
+# ============================================================
+# COMPACT REASONS / RISK
+# ============================================================
+
+left, right = st.columns([1, 1])
+
+with left:
+    st.write("**Why:**")
+    if a_plus.get("reasons"):
+        for reason in a_plus["reasons"][:3]:
+            st.write(f"• {reason}")
+    else:
+        st.write("No strong reasons yet.")
+
+with right:
+    st.write("**Risk Plan:**")
+    st.write(f"R/R: **{fmt(trade_plan.get('rr'))}**")
+    st.write(trade_plan.get("risk_note", "No risk note."))
+
+    if a_plus.get("warnings"):
+        for warning in a_plus["warnings"][:2]:
+            st.write(f"⚠️ {warning}")
+
+
+# ============================================================
+# TR3NDY CHART + LEVELS
+# ============================================================
+
+st.subheader("📐 Key Levels")
+
+daily_edges = trendy_edges.get("daily", {})
+weekly_edges = trendy_edges.get("weekly", {})
+
+l1, l2, l3, l4, l5, l6 = st.columns(6)
+
+l1.metric("D Supply", fmt(daily_edges.get("supply")))
+l2.metric("D Mid", fmt(daily_edges.get("mid")))
+l3.metric("D Demand", fmt(daily_edges.get("demand")))
+l4.metric("W Supply", fmt(weekly_edges.get("supply")))
+l5.metric("W Mid", fmt(weekly_edges.get("mid")))
+l6.metric("W Demand", fmt(weekly_edges.get("demand")))
+
+st.plotly_chart(trendy_chart, use_container_width=True)
+
+st.write("### 📍 Location Check")
+
+col1, col2, col3, col4 = st.columns(4)
+
+col1.metric("Near Call Target", "🟢 YES" if near_call_target else "🔴 NO")
+col2.metric("Near Put Target", "🟢 YES" if near_put_target else "🔴 NO")
+col3.metric("Near Demand", "🟢 YES" if near_demand else "🔴 NO")
+col4.metric("Near Supply", "🟢 YES" if near_supply else "🔴 NO")
+
+
+# ============================================================
+# GREEN LIGHT ALIGNMENT CHECK
+# ============================================================
+
+current_grade = a_plus.get("grade", "NEUTRAL")
+
+flow_aligned = a_plus.get("bullish_flow") or a_plus.get("bearish_flow")
+
+gamma_aligned = (
+    ("LONG" in current_grade and gamma_bias.get("net_oi", 0) > 0)
+    or ("SHORT" in current_grade and gamma_bias.get("net_oi", 0) < 0)
+)
+
+location_aligned = (
+    ("LONG" in current_grade and (near_demand or near_call_target))
+    or ("SHORT" in current_grade and (near_supply or near_put_target))
+)
+
+all_three_aligned = flow_aligned and gamma_aligned and location_aligned
+
+st.write("### ✅ Green Light Alignment")
+
+col1, col2, col3, col4 = st.columns(4)
+
+col1.metric("Flow", "🟢 YES" if flow_aligned else "🔴 NO")
+col2.metric("Gamma", "🟢 YES" if gamma_aligned else "🔴 NO")
+col3.metric("Location", "🟢 YES" if location_aligned else "🔴 NO")
+col4.metric("Green Light", "🟢 GO" if all_three_aligned else "🔴 WAIT")
+
+if all_three_aligned:
+    st.success("✅ GREEN LIGHT: Flow + Gamma + Location are aligned.")
+else:
+    st.warning("⏳ WAIT: Full alignment not confirmed yet.")
+
+
+# ============================================================
+# ALERT TIER LOGIC
+# ============================================================
+
+alert_tier = None
+
+if current_grade in ["A+ LONG", "A+ SHORT"]:
+    alert_tier = "A+"
+
+elif current_grade in ["B+ LONG", "B+ SHORT"]:
+    alert_tier = "B+"
+
+elif current_grade in ["B LONG", "B SHORT"]:
+    alert_tier = "B"
+
+elif a_plus.get("bullish_flow") or a_plus.get("bearish_flow"):
+    alert_tier = "WATCH"
+
+
+send_it = False
+
+if alert_level == "A+ Only":
+    send_it = alert_tier == "A+"
+
+elif alert_level == "A+ & B+":
+    send_it = alert_tier in ["A+", "B+"]
+
+elif alert_level == "All Signals":
+    send_it = alert_tier in ["A+", "B+", "B", "WATCH"]
+
+
+# ============================================================
+# ALERT SYSTEM
+# ============================================================
+
+st.subheader("🔔 Alert Status")
+
+if "last_alert_key" not in st.session_state:
+    st.session_state.last_alert_key = None
+
+if "last_alert_time" not in st.session_state:
+    st.session_state.last_alert_time = 0
+
+ALERT_COOLDOWN_SECONDS = 60
+
+now = time.time()
+
+alert_file = None
+
+if current_grade == "A+ LONG":
+    st.success("A+ LONG DETECTED 🚀")
+    alert_file = "a_plus_long.mp3"
+
+elif current_grade == "A+ SHORT":
+    st.error("A+ SHORT DETECTED 🔻")
+    alert_file = "a_plus_short.mp3"
+
+elif current_grade in ["B+ LONG", "B+ SHORT"]:
+    st.warning(f"{current_grade} setup ⚡")
+    alert_file = "b_setup.mp3"
+
+elif current_grade in ["B LONG", "B SHORT"]:
+    st.warning(f"{current_grade} setup 👀")
+    alert_file = "b_setup.mp3"
+
+elif alert_tier == "WATCH":
+    st.info("Watch setup forming 👀")
+
+else:
+    st.info("No high-quality setup")
+
+
+alert_key = f"{symbol}_{current_grade}_{round(float(spot_price), 1)}_{expiration}"
+
+should_alert = (
+    send_it
+    and alert_tier is not None
+    and all_three_aligned
+    and alert_key != st.session_state.last_alert_key
+    and (now - st.session_state.last_alert_time) > ALERT_COOLDOWN_SECONDS
+)
+
+
+if should_alert:
+    cockpit_text = f"""
+📊 COCKPIT DATA — {symbol}
+
+Spot: {fmt(spot_price)}
+Signal: {a_plus.get("grade")}
+Score: {a_plus.get("score")}
+Flow Bias: {flow_result.get("bias")}
+Net Score: {flow_result.get("net_score")}
+
+Top Call Target: {fmt(top_call)}
+Top Put Target: {fmt(top_put)}
+
+Net Premium: {fmt_money(net_premium)}
+Call Premium: {fmt_money(call_premium)}
+Put Premium: {fmt_money(put_premium)}
+
+Dealer Gamma Regime:
+- Regime: {gamma_regime.get("regime")}
+- Behavior: {gamma_regime.get("behavior")}
+- Net GEX: {fmt_money(gamma_regime.get("net_gex"))}
+- 0DTE Note: {gamma_regime.get("odte_note")}
+
+Intraday Gamma:
+- Open GEX: {fmt_money(intraday_gamma.get("open_gex"))}
+- Current GEX: {fmt_money(intraday_gamma.get("current_gex"))}
+- GEX Shift: {fmt_money(intraday_gamma.get("gex_shift"))}
+
+Expected Move:
+- ATM Strike: {fmt(expected_move.get("atm_strike"))}
+- Expected Move: {fmt(expected_move.get("expected_move"))}
+- Upper: {fmt(expected_move.get("upper"))}
+- Lower: {fmt(expected_move.get("lower"))}
+
+Location:
+- Near Call Target: {"YES" if near_call_target else "NO"}
+- Near Put Target: {"YES" if near_put_target else "NO"}
+- Near Demand: {"YES" if near_demand else "NO"}
+- Near Supply: {"YES" if near_supply else "NO"}
+
+Green Light:
+- Flow: {"YES" if flow_aligned else "NO"}
+- Gamma: {"YES" if gamma_aligned else "NO"}
+- Location: {"YES" if location_aligned else "NO"}
+- Final: {"GO" if all_three_aligned else "WAIT"}
+""".strip()
+
+    base_message = (
+        cockpit_text
+        + "\n\n"
+        + gamma_delta_text
+        + "\n\n"
+        + trendy_text
+        + "\n\n"
+        + trade_plan_text
+    )
+
+    if alert_tier == "A+":
+        discord_message = f"🚨🚨 **{alert_tier} SIGNAL** 🚨🚨\n{base_message}"
+    elif alert_tier == "B+":
+        discord_message = f"⚡ **{alert_tier} SETUP** ⚡\n{base_message}"
+    elif alert_tier == "B":
+        discord_message = f"👀 **{alert_tier} WATCHLIST SETUP**\n{base_message}"
+    else:
+        discord_message = f"📡 **WATCH SIGNAL**\n{base_message}"
+
+    if alert_file and os.path.exists(alert_file):
+        with open(alert_file, "rb") as f:
+            st.audio(f.read(), format="audio/mp3")
+
+    if send_discord:
+        ok, result = send_discord_alert(discord_message)
+
+        if ok:
+            st.success(f"Discord alert sent: {alert_tier}")
         else:
-            st.info("Need more history to build the chart.")
+            st.warning(result)
+
+    st.session_state.last_alert_key = alert_key
+    st.session_state.last_alert_time = now
+
+    st.write(f"🔊 Alert fired: {alert_tier}")
+
+
+# ============================================================
+# SIGNAL MESSAGE PREVIEW
+# ============================================================
+
+if alert_tier:
+    st.write("### Signal Message Preview")
+    st.code(
+        format_flow_alert(flow_result, symbol=symbol)
+        + "\n\n"
+        + gamma_delta_text
+        + "\n\n"
+        + trendy_text
+        + "\n\n"
+        + trade_plan_text
+    )
+
+
+# ============================================================
+# EXPANDERS
+# ============================================================
+
+with st.expander("🔥 Full Options Flow Bias"):
+    st.write(flow_result.get("message", "No flow message available."))
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Upside Score", f'{flow_result.get("upside_score", 0)}/100')
+    col2.metric("Downside Score", f'{flow_result.get("downside_score", 0)}/100')
+    col3.metric("Bias", flow_result.get("bias", "NEUTRAL"))
+
+
+with st.expander("🧠 Gamma / OI Details"):
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Gamma Bias", gamma_bias.get("bias", "N/A"))
+    col2.metric("Call OI", f'{gamma_bias.get("call_oi", 0):,.0f}')
+    col3.metric("Put OI", f'{gamma_bias.get("put_oi", 0):,.0f}')
+
+    left, right = st.columns(2)
+
+    with left:
+        st.write("### Top Total OI")
+        st.dataframe(oi_levels.get("top_oi"), use_container_width=True)
+
+    with right:
+        st.write("### Top Call OI")
+        st.dataframe(oi_levels.get("top_calls"), use_container_width=True)
+
+        st.write("### Top Put OI")
+        st.dataframe(oi_levels.get("top_puts"), use_container_width=True)
+
+
+with st.expander("🧠 Gamma / Delta Level Detail"):
+    if gamma_delta_result.get("error"):
+        st.warning(gamma_delta_result.get("error"))
     else:
-        st.info("Flow chart will populate as refresh history builds.")
+        st.write(gamma_delta_text)
 
-# ---------------------------------------------------------
-# STRIKE LADDER
-# ---------------------------------------------------------
-st.subheader("Strike Ladder")
+        if gamma_delta_detail is not None:
+            st.dataframe(gamma_delta_detail, use_container_width=True)
 
-all_strikes_sorted = sorted(
-    strike_summary.items(),
-    key=lambda item: item[0]
-)
 
-table_rows = []
+with st.expander("🔄 Intraday Gamma Detail"):
+    st.json(intraday_gamma)
 
-for strike, data in all_strikes_sorted:
-    call_premium = round(data["call_premium"], 2)
-    put_premium = round(data["put_premium"], 2)
-    total_premium = round(data["total_premium"], 2)
 
-    if call_premium > put_premium:
-        dominance = "CALLS"
-    elif put_premium > call_premium:
-        dominance = "PUTS"
-    else:
-        dominance = "BALANCED"
+with st.expander("📦 Expected Move Detail"):
+    st.json(expected_move)
 
-    table_rows.append({
-        "Strike": strike,
-        "ATM": "",
-        "Dominance": dominance,
-        "Call Premium": call_premium,
-        "Put Premium": put_premium,
-        "Total Premium": total_premium
-    })
 
-df = pd.DataFrame(table_rows)
+with st.expander("📝 Morning Snapshot Export"):
+    st.code(morning_snapshot)
 
-if not df.empty:
-    atm_index = (df["Strike"] - result["spot"]).abs().idxmin()
-    df.loc[atm_index, "ATM"] = "ATM"
+    st.download_button(
+        label="Download Morning Snapshot",
+        data=morning_snapshot,
+        file_name=f"{symbol}_morning_snapshot.txt",
+        mime="text/plain"
+    )
 
-def style_rows(row):
-    styles = []
 
-    for col in row.index:
-        cell_style = ""
-
-        if col == "Dominance":
-            if row["Dominance"] == "CALLS":
-                cell_style = "background-color: #0f9d58; color: white"
-            elif row["Dominance"] == "PUTS":
-                cell_style = "background-color: #d93025; color: white"
-            else:
-                cell_style = "background-color: #9aa0a6; color: white"
-
-        if row["ATM"] == "ATM" and col in ["Strike", "ATM"]:
-            cell_style = "background-color: #f9ab00; color: black; font-weight: bold"
-
-        styles.append(cell_style)
-
-    return styles
-
-styled_df = df.style.apply(style_rows, axis=1)
-st.dataframe(styled_df, use_container_width=True)
+with st.expander("📊 Raw Option Chain"):
+    st.dataframe(chain_df, use_container_width=True)
