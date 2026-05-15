@@ -2,12 +2,10 @@
 # expiration_flow_dashboard.py
 # SPY / SPX / QQQ
 # Premium Flow Dashboard + Signed Delta Bias Metrics
-# Sends chart to Discord
+# Public app version - Discord sending removed
 # ============================================================
 
 import os
-import time
-import tempfile
 from pathlib import Path
 from datetime import datetime
 
@@ -31,38 +29,6 @@ load_dotenv(dotenv_path=ENV_PATH, override=True)
 TRADIER_API_KEY = os.getenv("TRADIER_API_KEY")
 TRADIER_BASE_URL = os.getenv("TRADIER_BASE_URL", "https://api.tradier.com/v1")
 
-# Discord webhooks for this dashboard.
-# Add these to your .env:
-# DISCORD_WEBHOOK_SPY0DTE=https://discord.com/api/webhooks/...
-# DISCORD_WEBHOOK_SPX0DTE=https://discord.com/api/webhooks/...
-#
-# Hard fallbacks are included below for the two webhooks you supplied.
-EXPIRATION_FLOW_WEBHOOKS = {
-    "SPY": (
-        os.getenv("DISCORD_WEBHOOK_SPY0DTE", "").strip()
-        or os.getenv("EXPIRATION_FLOW_DISCORD_WEBHOOK", "").strip()
-        or "https://discord.com/api/webhooks/1504268965076271236/-9Sicy0nJaVzph6k8cO2bVPvTfIKHmV3GXr708-ozqFu8DFsA5kDXpiuxG_i_LH6Myqm"
-    ),
-    "SPX": (
-        os.getenv("DISCORD_WEBHOOK_SPX0DTE", "").strip()
-        or "https://discord.com/api/webhooks/1504519376039317687/HXSV_L7e6eeX-ibPj0RgGcBvOoviOIO6in-FF0N5-Uy_3u8moUbKOywyH1ZIFGUGh6hP"
-    ),
-    "QQQ": (
-        os.getenv("DISCORD_WEBHOOK_QQQ0DTE", "").strip()
-        or "https://discord.com/api/webhooks/1504593299401343008/GQMRqHnnRYxD-FCUsdG-Mz8ibvLBudteZcLy2cSQKv6HK8Z-jf0cSZTY1QHGicJpvMc8"
-    ),
-}
-
-
-def get_expiration_flow_webhook(symbol):
-    return EXPIRATION_FLOW_WEBHOOKS.get(symbol.upper().strip(), "")
-
-
-print("Expiration flow webhook endings:", {
-    sym: (url[-16:] if url else "MISSING")
-    for sym, url in EXPIRATION_FLOW_WEBHOOKS.items()
-})
-
 HEADERS = {
     "Authorization": f"Bearer {TRADIER_API_KEY}",
     "Accept": "application/json",
@@ -74,7 +40,7 @@ HEADERS = {
 # ============================================================
 
 st.set_page_config(
-    page_title="Expiration Flow Dashboard",
+    page_title="SG2 Premium Hybrid Flow Dashboard",
     page_icon="🟢",
     layout="wide",
 )
@@ -129,7 +95,7 @@ section[data-testid="stSidebar"] {
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🟢 Expiration Flow Dashboard")
+st.title("🟢 SG2 Premium Hybrid Flow Dashboard")
 st.caption("Premium Flow Chart with Signed Delta Bias, Delta Ratio, and Gamma Context")
 
 
@@ -143,12 +109,6 @@ symbol = st.sidebar.selectbox(
     "Symbol",
     SYMBOLS,
     index=0,
-)
-
-discord_symbols = st.sidebar.multiselect(
-    "Discord Symbols To Send",
-    SYMBOLS,
-    default=["SPY", "SPX", "QQQ"],
 )
 
 auto_refresh = st.sidebar.checkbox("Auto Refresh", value=True)
@@ -202,12 +162,6 @@ chain_width = st.sidebar.slider(
     step=25,
 )
 
-send_now = st.sidebar.button("Send To Discord Now")
-
-auto_send_discord = st.sidebar.checkbox(
-    "Auto Send To Discord Every 60 Seconds",
-    value=False,
-)
 
 st.sidebar.caption(
     "Primary chart model: Premium Flow = Option Price × Contracts × 100."
@@ -216,13 +170,12 @@ st.sidebar.caption(
     "Secondary bias model: Signed Delta Notional = Spot × Delta × Contracts × 100."
 )
 
-reset_history = st.sidebar.button("Reset Session History")
+st.sidebar.markdown("---")
+st.sidebar.caption(
+    "Public app mode: chart controls are session-based. "
+    "Changing sliders here will not change another viewer's open session."
+)
 
-st.sidebar.caption("Expiration webhook endings:")
-st.sidebar.caption({
-    sym: (get_expiration_flow_webhook(sym)[-16:] if get_expiration_flow_webhook(sym) else "MISSING")
-    for sym in SYMBOLS
-})
 
 if auto_refresh:
     st_autorefresh(
@@ -795,7 +748,7 @@ def build_chart_df(history_df):
 
     df["zero_dte_flow"] = df["zero_dte_net_premium"].diff().fillna(0).cumsum()
     df["all_exp_flow"] = df["all_exp_net_premium"].diff().fillna(0).cumsum()
-    df["time"] = pd.to_datetime(df["datetime"]).dt.strftime("%H:%M:%S")
+    df["time"] = pd.to_datetime(df["datetime"])
 
     return df
 
@@ -818,8 +771,8 @@ def flow_comparison_chart(history_df, symbol, flow_data):
         )
         return fig
 
-    # Plain string x-axis labels prevent Plotly/Kaleido Timestamp JSON errors.
-    df["time"] = df["time"].astype(str)
+    # Keep x-axis as real datetime so time spacing plots correctly.
+    df["time"] = pd.to_datetime(df["time"])
 
     fig = go.Figure()
 
@@ -956,7 +909,7 @@ def flow_comparison_chart(history_df, symbol, flow_data):
     latest_all = df["all_exp_flow"].iloc[-1]
     latest_zero = df["zero_dte_flow"].iloc[-1]
     latest_spot = df["spot"].iloc[-1]
-    latest_time = str(df["time"].iloc[-1])
+    latest_time = df["time"].iloc[-1]
 
     fig.add_annotation(
         x=latest_time,
@@ -1050,8 +1003,9 @@ def flow_comparison_chart(history_df, symbol, flow_data):
             showgrid=True,
             gridcolor="rgba(255,255,255,0.16)",
             tickfont=dict(color="white", size=14, family="Arial Black"),
-            nticks=18,
-            type="category",
+            nticks=10,
+            type="date",
+            tickformat="%H:%M",
         ),
         yaxis=dict(
             title=dict(text="Premium Flow", font=dict(color="#facc15", size=16)),
@@ -1087,61 +1041,6 @@ def flow_comparison_chart(history_df, symbol, flow_data):
 
 
 # ============================================================
-# DISCORD
-# ============================================================
-
-def send_expiration_flow_to_discord(history_df, symbol, flow_data):
-    webhook_url = get_expiration_flow_webhook(symbol)
-
-    if not webhook_url:
-        print(f"Missing Discord webhook for {symbol}.")
-        return False
-
-    print(f"{symbol} expiration webhook ending:", webhook_url[-16:])
-
-    try:
-        fig = flow_comparison_chart(history_df, symbol, flow_data)
-
-        image_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-        image_path = image_file.name
-        image_file.close()
-
-        fig.write_image(
-            image_path,
-            width=1800,
-            height=1000,
-            scale=2,
-        )
-
-        with open(image_path, "rb") as f:
-            response = requests.post(
-                webhook_url,
-                files={
-                    "file": (
-                        f"{symbol}_expiration_flow.png",
-                        f,
-                        "image/png",
-                    )
-                },
-                timeout=30,
-            )
-
-        try:
-            os.remove(image_path)
-        except Exception:
-            pass
-
-        print(f"{symbol} Expiration Flow Discord status:", response.status_code, response.text)
-
-        return response.status_code in [200, 204]
-
-    except Exception as e:
-        print(f"{symbol} Expiration Flow Discord send failed:")
-        print(e)
-        return False
-
-
-# ============================================================
 # LOAD DATA
 # ============================================================
 
@@ -1153,59 +1052,6 @@ except Exception as e:
     st.error(f"Failed to load expiration flow for {symbol}")
     st.exception(e)
     st.stop()
-
-
-# ============================================================
-# DISCORD SEND LOGIC
-# ============================================================
-
-if "last_exp_flow_discord_send" not in st.session_state:
-    st.session_state.last_exp_flow_discord_send = 0
-
-EXP_FLOW_DISCORD_INTERVAL_SECONDS = 60
-
-seconds_since_exp_flow_send = (
-    time.time() - st.session_state.last_exp_flow_discord_send
-)
-
-should_auto_send_exp_flow = (
-    auto_send_discord
-    and seconds_since_exp_flow_send >= EXP_FLOW_DISCORD_INTERVAL_SECONDS
-)
-
-if send_now or should_auto_send_exp_flow:
-    send_results = []
-
-    for sym in discord_symbols:
-        try:
-            if sym == symbol:
-                sym_flow_data = flow_data
-                sym_history_df = history_df
-            else:
-                sym_flow_data = load_expiration_flow(sym)
-                sym_history_df = append_snapshot(sym_flow_data)
-
-            ok = send_expiration_flow_to_discord(
-                history_df=sym_history_df,
-                symbol=sym,
-                flow_data=sym_flow_data,
-            )
-
-            send_results.append(f"{sym}: {'OK' if ok else 'FAILED'}")
-
-        except Exception as e:
-            print(f"{sym} expiration flow failed:")
-            print(e)
-            send_results.append(f"{sym}: FAILED")
-
-    st.session_state.last_exp_flow_discord_send = time.time()
-
-    discord_status = " | ".join(send_results)
-
-    if "FAILED" in discord_status:
-        st.warning(discord_status)
-    else:
-        st.success(discord_status)
 
 
 # ============================================================
