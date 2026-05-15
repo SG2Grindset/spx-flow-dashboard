@@ -1279,7 +1279,7 @@ def analyze_flow_signals(history_df, symbol, flow_data):
 
 
 def render_sg2_flow_matrix(signal_result):
-    symbol = signal_result["symbol"]
+    st.markdown("### 🧠 SG2 FLOW AI SIGNAL MATRIX")
 
     rows = [
         ("Flow Cross", signal_result["flow_cross"]),
@@ -1288,38 +1288,24 @@ def render_sg2_flow_matrix(signal_result):
         ("Spike/Dump", signal_result["spike_dump"]),
     ]
 
-    html = f"""
-    <div class="sg2-panel">
-        <div>
-            <span class="sg2-title">SG2 FLOW</span>
-            <span class="sg2-subtitle">AI SIGNAL MATRIX</span>
-            <span style="float:right;color:#a3e635;font-weight:900;">
-                {datetime.now(CENTRAL_TZ).strftime('%b. %d %Y %I:%M %p CT')}
-            </span>
-        </div>
-        <table class="sg2-table">
-            <tr>
-                <th></th>
-                <th>{symbol}</th>
-                <th>Status</th>
-            </tr>
-    """
+    data = []
 
     for label, status in rows:
-        html += f"""
-            <tr>
-                <td class="sg2-label">&gt; {label}</td>
-                <td class="sg2-cell">{_status_icon(status)}</td>
-                <td class="sg2-cell">{_status_text(status)}</td>
-            </tr>
-        """
+        data.append(
+            {
+                "Signal": label,
+                symbol: _status_icon(status),
+                "Status": _status_text(status),
+            }
+        )
 
-    html += """
-        </table>
-    </div>
-    """
+    matrix_df = pd.DataFrame(data)
 
-    st.markdown(html, unsafe_allow_html=True)
+    st.dataframe(
+        matrix_df,
+        width="stretch",
+        hide_index=True,
+    )
 
 
 def render_signal_log(signal_result):
