@@ -8,6 +8,7 @@
 import os
 from pathlib import Path
 from datetime import datetime
+from gamma_level_engine import build_gamma_delta_levels
 
 import requests
 import pandas as pd
@@ -579,7 +580,8 @@ def load_expiration_flow(symbol):
 
     zero_flow = calculate_net_flow(zero_dte_chain, spot)
     all_flow = calculate_net_flow(all_chain, spot)
-    gamma_levels = get_gamma_levels(all_chain)
+    gamma_result = build_gamma_delta_levels(all_chain, spot)
+    gamma_levels = gamma_result.get("levels", {})
 
     return {
         "symbol": symbol,
@@ -1005,15 +1007,16 @@ m2.metric("Spot", fmt(flow_data["spot"]))
 m3.metric("0DTE Signed Delta", money_fmt(flow_data["zero_dte"]["net_premium"]))
 m4.metric("All Exp Signed Delta", money_fmt(flow_data["all_exp"]["net_premium"]))
 m5.metric(
-    "Call Gamma",
-    fmt(gamma_levels.get("top_call_gamma"))
-    if gamma_levels.get("top_call_gamma")
+    "Call Wall",
+    fmt(gamma_levels.get("call_wall"))
+    if gamma_levels.get("call_wall")
     else "N/A",
 )
+
 m6.metric(
-    "Put Gamma",
-    fmt(gamma_levels.get("top_put_gamma"))
-    if gamma_levels.get("top_put_gamma")
+    "Put Wall",
+    fmt(gamma_levels.get("put_wall"))
+    if gamma_levels.get("put_wall")
     else "N/A",
 )
 
