@@ -51,7 +51,7 @@ st.set_page_config(
 st.markdown("""
 <style>
 .stApp {
-    background-color: #000000 !important;
+    background-color: #202326 !important;
     color: white !important;
 }
 
@@ -61,17 +61,17 @@ html, body, [class*="css"] {
 }
 
 [data-testid="stHeader"] {
-    background-color: #000000 !important;
+    background-color: #202326 !important;
 }
 
 section[data-testid="stSidebar"] {
-    background-color: #000000 !important;
+    background-color: #202326 !important;
 }
 
 .block-container {
     padding-top: 0.5rem;
     max-width: 100%;
-    background-color: #000000 !important;
+    background-color: #202326 !important;
 }
 
 [data-testid="metric-container"] {
@@ -160,6 +160,40 @@ section[data-testid="stSidebar"] {
     line-height: 1.55;
     border-bottom: 1px solid rgba(255,255,255,0.07);
     padding: 5px 0;
+}
+
+
+/* SG2 readability fixes */
+section[data-testid="stSidebar"] * {
+    color: #ffffff !important;
+}
+
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span {
+    color: #ffffff !important;
+    opacity: 1 !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
+    color: #d1d5db !important;
+    opacity: 1 !important;
+}
+
+.stApp h1, .stApp h2, .stApp h3, .stApp p, .stApp span, .stApp div {
+    opacity: 1;
+}
+
+[data-testid="stMarkdownContainer"] p {
+    color: #d1d5db !important;
+}
+
+div[data-baseweb="select"] * {
+    color: #111827 !important;
+}
+
+input {
+    color: #111827 !important;
 }
 
 </style>
@@ -1307,7 +1341,7 @@ def render_sg2_flow_matrix(all_signal_results):
 
     html = """
     <div style="
-        background:#000000;
+        background:#0b0f14;
         border:1px solid rgba(250,204,21,0.45);
         border-radius:18px;
         padding:18px;
@@ -1327,7 +1361,7 @@ def render_sg2_flow_matrix(all_signal_results):
         <table style="
             width:100%;
             border-collapse:collapse;
-            background:#000000;
+            background:#0b0f14;
             color:white;
         ">
             <tr>
@@ -1345,7 +1379,7 @@ def render_sg2_flow_matrix(all_signal_results):
 
         html += f"""
             <tr>
-                <td style="color:#c084fc;font-size:18px;font-weight:900;padding:12px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.07);">
+                <td style="color:#f59e0b;font-size:18px;font-weight:900;padding:12px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.07);">
                     &gt; {signal_labels[signal_type]}
                 </td>
                 <td style="font-size:24px;font-weight:900;padding:12px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.07);">
@@ -1403,6 +1437,8 @@ except Exception as e:
 # ============================================================
 
 all_signal_results = {}
+
+st.caption("Building SG2 Flow Matrix for SPY / SPX / QQQ...")
 
 for sym in ["SPY", "SPX", "QQQ"]:
     try:
