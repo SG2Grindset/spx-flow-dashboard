@@ -203,9 +203,6 @@ def reset_symbol_history(symbol):
         file_path.unlink()
 
 
-if reset_history:
-    reset_symbol_history(symbol)
-    st.sidebar.success(f"{symbol} expiration flow history reset.")
 
 
 # ============================================================
