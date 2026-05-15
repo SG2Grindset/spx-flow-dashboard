@@ -51,7 +51,7 @@ st.set_page_config(
 st.markdown("""
 <style>
 .stApp {
-    background-color: #202326 !important;
+    background-color: #000000 !important;
     color: white !important;
 }
 
@@ -61,17 +61,17 @@ html, body, [class*="css"] {
 }
 
 [data-testid="stHeader"] {
-    background-color: #202326 !important;
+    background-color: #000000 !important;
 }
 
 section[data-testid="stSidebar"] {
-    background-color: #16191c !important;
+    background-color: #000000 !important;
 }
 
 .block-container {
     padding-top: 0.5rem;
     max-width: 100%;
-    background-color: #202326 !important;
+    background-color: #000000 !important;
 }
 
 [data-testid="metric-container"] {
@@ -285,6 +285,18 @@ SESSION_DIR.mkdir(exist_ok=True)
 
 def session_file(symbol):
     return SESSION_DIR / f"expiration_flow_{symbol.upper()}.csv"
+
+
+def load_symbol_history(symbol):
+    file_path = session_file(symbol)
+
+    if file_path.exists():
+        try:
+            return pd.read_csv(file_path)
+        except Exception:
+            return pd.DataFrame()
+
+    return pd.DataFrame()
 
 
 def reset_symbol_history(symbol):
@@ -1278,34 +1290,82 @@ def analyze_flow_signals(history_df, symbol, flow_data):
     }
 
 
-def render_sg2_flow_matrix(signal_result):
-    st.markdown("### 🧠 SG2 FLOW AI SIGNAL MATRIX")
-
-    rows = [
-        ("Flow Cross", signal_result["flow_cross"]),
-        ("Flow Divergence", signal_result["flow_divergence"]),
-        ("Key Level", signal_result["key_level"]),
-        ("Spike/Dump", signal_result["spike_dump"]),
+def render_sg2_flow_matrix(all_signal_results):
+    signal_types = [
+        "flow_cross",
+        "flow_divergence",
+        "key_level",
+        "spike_dump",
     ]
 
-    data = []
+    signal_labels = {
+        "flow_cross": "Flow Cross",
+        "flow_divergence": "Flow Divergence",
+        "key_level": "Key Level",
+        "spike_dump": "Spike/Dump",
+    }
 
-    for label, status in rows:
-        data.append(
-            {
-                "Signal": label,
-                symbol: _status_icon(status),
-                "Status": _status_text(status),
-            }
-        )
+    html = """
+    <div style="
+        background:#000000;
+        border:1px solid rgba(250,204,21,0.45);
+        border-radius:18px;
+        padding:18px;
+        margin:8px 0 18px 0;
+        box-shadow:0 0 22px rgba(0,0,0,0.65);
+    ">
+        <div style="
+            color:#facc15;
+            font-size:28px;
+            font-weight:900;
+            margin-bottom:12px;
+            letter-spacing:0.5px;
+        ">
+            🧠 SG2 FLOW AI SIGNAL MATRIX
+        </div>
 
-    matrix_df = pd.DataFrame(data)
+        <table style="
+            width:100%;
+            border-collapse:collapse;
+            background:#000000;
+            color:white;
+        ">
+            <tr>
+                <th style="color:#a3e635;font-size:18px;padding:10px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.16);">Signal</th>
+                <th style="color:#a3e635;font-size:18px;padding:10px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.16);">SPY</th>
+                <th style="color:#a3e635;font-size:18px;padding:10px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.16);">SPX</th>
+                <th style="color:#a3e635;font-size:18px;padding:10px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.16);">QQQ</th>
+            </tr>
+    """
 
-    st.dataframe(
-        matrix_df,
-        width="stretch",
-        hide_index=True,
-    )
+    for signal_type in signal_types:
+        spy_signal = all_signal_results.get("SPY", {}).get(signal_type, "neutral")
+        spx_signal = all_signal_results.get("SPX", {}).get(signal_type, "neutral")
+        qqq_signal = all_signal_results.get("QQQ", {}).get(signal_type, "neutral")
+
+        html += f"""
+            <tr>
+                <td style="color:#c084fc;font-size:18px;font-weight:900;padding:12px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.07);">
+                    &gt; {signal_labels[signal_type]}
+                </td>
+                <td style="font-size:24px;font-weight:900;padding:12px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.07);">
+                    {_status_icon(spy_signal)}
+                </td>
+                <td style="font-size:24px;font-weight:900;padding:12px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.07);">
+                    {_status_icon(spx_signal)}
+                </td>
+                <td style="font-size:24px;font-weight:900;padding:12px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.07);">
+                    {_status_icon(qqq_signal)}
+                </td>
+            </tr>
+        """
+
+    html += """
+        </table>
+    </div>
+    """
+
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def render_signal_log(signal_result):
@@ -1342,15 +1402,46 @@ except Exception as e:
 # SG2 FLOW MATRIX DISPLAY
 # ============================================================
 
-signal_result = analyze_flow_signals(
-    history_df=history_df,
-    symbol=symbol,
-    flow_data=flow_data,
-)
+all_signal_results = {}
+
+for sym in ["SPY", "SPX", "QQQ"]:
+    try:
+        if sym == symbol:
+            sym_flow_data = flow_data
+            sym_history_df = history_df
+        else:
+            sym_flow_data = load_expiration_flow(sym)
+            sym_history_df = append_snapshot(sym_flow_data)
+
+        all_signal_results[sym] = analyze_flow_signals(
+            history_df=sym_history_df,
+            symbol=sym,
+            flow_data=sym_flow_data,
+        )
+
+    except Exception as e:
+        print(f"SG2 matrix failed for {sym}: {e}")
+        all_signal_results[sym] = {
+            "symbol": sym,
+            "flow_cross": "neutral",
+            "flow_divergence": "neutral",
+            "key_level": "neutral",
+            "spike_dump": "neutral",
+            "messages": [f"{sym}: Signal data unavailable."],
+        }
 
 if show_ai_panel:
-    render_sg2_flow_matrix(signal_result)
-    render_signal_log(signal_result)
+    render_sg2_flow_matrix(all_signal_results)
+
+    selected_signal_result = all_signal_results.get(
+        symbol,
+        {
+            "symbol": symbol,
+            "messages": [f"{symbol}: Signal data unavailable."],
+        },
+    )
+
+    render_signal_log(selected_signal_result)
 
 
 # ============================================================
