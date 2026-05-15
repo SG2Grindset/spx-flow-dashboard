@@ -51,7 +51,7 @@ st.set_page_config(
 st.markdown("""
 <style>
 .stApp {
-    background-color: #202326 !important;
+    background-color: #000000 !important;
     color: white !important;
 }
 
@@ -61,17 +61,17 @@ html, body, [class*="css"] {
 }
 
 [data-testid="stHeader"] {
-    background-color: #202326 !important;
+    background-color: #000000 !important;
 }
 
 section[data-testid="stSidebar"] {
-    background-color: #16191c !important;
+    background-color: #000000 !important;
 }
 
 .block-container {
     padding-top: 0.5rem;
     max-width: 100%;
-    background-color: #202326 !important;
+    background-color: #000000 !important;
 }
 
 [data-testid="metric-container"] {
@@ -160,37 +160,6 @@ section[data-testid="stSidebar"] {
     line-height: 1.55;
     border-bottom: 1px solid rgba(255,255,255,0.07);
     padding: 5px 0;
-}
-
-
-/* SG2 readability fixes */
-section[data-testid="stSidebar"] * {
-    color: #ffffff !important;
-}
-
-section[data-testid="stSidebar"] label,
-section[data-testid="stSidebar"] p,
-section[data-testid="stSidebar"] span {
-    color: #ffffff !important;
-    opacity: 1 !important;
-}
-
-section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
-    color: #d1d5db !important;
-    opacity: 1 !important;
-}
-
-[data-testid="stMarkdownContainer"] p {
-    color: #d1d5db !important;
-}
-
-div[data-baseweb="select"] span {
-    color: #111827 !important;
-}
-
-input {
-    color: #111827 !important;
-    background-color: #ffffff !important;
 }
 
 </style>
@@ -310,7 +279,7 @@ if auto_refresh:
 # SESSION FILES
 # ============================================================
 
-SESSION_DIR = Path(__file__).parent / "sg2_flow_ai_history_v1"
+SESSION_DIR = Path(__file__).parent / "expiration_flow_history_v3"
 SESSION_DIR.mkdir(exist_ok=True)
 
 
@@ -1338,7 +1307,7 @@ def render_sg2_flow_matrix(all_signal_results):
 
     html = """
     <div style="
-        background:#0b0f14;
+        background:#000000;
         border:1px solid rgba(250,204,21,0.45);
         border-radius:18px;
         padding:18px;
@@ -1358,7 +1327,7 @@ def render_sg2_flow_matrix(all_signal_results):
         <table style="
             width:100%;
             border-collapse:collapse;
-            background:#0b0f14;
+            background:#000000;
             color:white;
         ">
             <tr>
@@ -1376,7 +1345,7 @@ def render_sg2_flow_matrix(all_signal_results):
 
         html += f"""
             <tr>
-                <td style="color:#f59e0b;font-size:18px;font-weight:900;padding:12px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.07);">
+                <td style="color:#c084fc;font-size:18px;font-weight:900;padding:12px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.07);">
                     &gt; {signal_labels[signal_type]}
                 </td>
                 <td style="font-size:24px;font-weight:900;padding:12px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.07);">
@@ -1427,6 +1396,52 @@ except Exception as e:
     st.error(f"Failed to load expiration flow for {symbol}")
     st.exception(e)
     st.stop()
+
+
+# ============================================================
+# SG2 FLOW MATRIX DISPLAY
+# ============================================================
+
+all_signal_results = {}
+
+for sym in ["SPY", "SPX", "QQQ"]:
+    try:
+        if sym == symbol:
+            sym_flow_data = flow_data
+            sym_history_df = history_df
+        else:
+            sym_flow_data = load_expiration_flow(sym)
+            sym_history_df = append_snapshot(sym_flow_data)
+
+        all_signal_results[sym] = analyze_flow_signals(
+            history_df=sym_history_df,
+            symbol=sym,
+            flow_data=sym_flow_data,
+        )
+
+    except Exception as e:
+        print(f"SG2 matrix failed for {sym}: {e}")
+        all_signal_results[sym] = {
+            "symbol": sym,
+            "flow_cross": "neutral",
+            "flow_divergence": "neutral",
+            "key_level": "neutral",
+            "spike_dump": "neutral",
+            "messages": [f"{sym}: Signal data unavailable."],
+        }
+
+if show_ai_panel:
+    render_sg2_flow_matrix(all_signal_results)
+
+    selected_signal_result = all_signal_results.get(
+        symbol,
+        {
+            "symbol": symbol,
+            "messages": [f"{symbol}: Signal data unavailable."],
+        },
+    )
+
+    render_signal_log(selected_signal_result)
 
 
 # ============================================================
@@ -1570,61 +1585,6 @@ st.plotly_chart(
     ),
     width="stretch",
 )
-
-
-# ============================================================
-# SG2 FLOW MATRIX DISPLAY
-# ============================================================
-
-all_signal_results = {}
-
-st.caption("SG2 Flow Matrix for SPY / SPX / QQQ")
-
-matrix_status = st.empty()
-
-with st.spinner("Loading SG2 Flow Matrix..."):
-    matrix_symbols = ["SPY", "SPX", "QQQ"]
-
-for sym in matrix_symbols:
-    try:
-        if sym == symbol:
-            sym_flow_data = flow_data
-            sym_history_df = history_df
-        else:
-            sym_flow_data = load_expiration_flow(sym)
-            sym_history_df = append_snapshot(sym_flow_data)
-
-        all_signal_results[sym] = analyze_flow_signals(
-            history_df=sym_history_df,
-            symbol=sym,
-            flow_data=sym_flow_data,
-        )
-
-    except Exception as e:
-        print(f"SG2 matrix failed for {sym}: {e}")
-        all_signal_results[sym] = {
-            "symbol": sym,
-            "flow_cross": "neutral",
-            "flow_divergence": "neutral",
-            "key_level": "neutral",
-            "spike_dump": "neutral",
-            "messages": [f"{sym}: Signal data unavailable."],
-        }
-
-if show_ai_panel:
-    render_sg2_flow_matrix(all_signal_results)
-
-    selected_signal_result = all_signal_results.get(
-        symbol,
-        {
-            "symbol": symbol,
-            "messages": [f"{symbol}: Signal data unavailable."],
-        },
-    )
-
-    render_signal_log(selected_signal_result)
-
-
 
 
 # ============================================================
