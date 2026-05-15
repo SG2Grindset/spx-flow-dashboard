@@ -65,7 +65,7 @@ html, body, [class*="css"] {
 }
 
 section[data-testid="stSidebar"] {
-    background-color: #202326 !important;
+    background-color: #16191c !important;
 }
 
 .block-container {
@@ -180,20 +180,17 @@ section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
     opacity: 1 !important;
 }
 
-.stApp h1, .stApp h2, .stApp h3, .stApp p, .stApp span, .stApp div {
-    opacity: 1;
-}
-
 [data-testid="stMarkdownContainer"] p {
     color: #d1d5db !important;
 }
 
-div[data-baseweb="select"] * {
+div[data-baseweb="select"] span {
     color: #111827 !important;
 }
 
 input {
     color: #111827 !important;
+    background-color: #ffffff !important;
 }
 
 </style>
@@ -313,7 +310,7 @@ if auto_refresh:
 # SESSION FILES
 # ============================================================
 
-SESSION_DIR = Path(__file__).parent / "expiration_flow_history_v3"
+SESSION_DIR = Path(__file__).parent / "sg2_flow_ai_history_v1"
 SESSION_DIR.mkdir(exist_ok=True)
 
 
@@ -1433,54 +1430,6 @@ except Exception as e:
 
 
 # ============================================================
-# SG2 FLOW MATRIX DISPLAY
-# ============================================================
-
-all_signal_results = {}
-
-st.caption("Building SG2 Flow Matrix for SPY / SPX / QQQ...")
-
-for sym in ["SPY", "SPX", "QQQ"]:
-    try:
-        if sym == symbol:
-            sym_flow_data = flow_data
-            sym_history_df = history_df
-        else:
-            sym_flow_data = load_expiration_flow(sym)
-            sym_history_df = append_snapshot(sym_flow_data)
-
-        all_signal_results[sym] = analyze_flow_signals(
-            history_df=sym_history_df,
-            symbol=sym,
-            flow_data=sym_flow_data,
-        )
-
-    except Exception as e:
-        print(f"SG2 matrix failed for {sym}: {e}")
-        all_signal_results[sym] = {
-            "symbol": sym,
-            "flow_cross": "neutral",
-            "flow_divergence": "neutral",
-            "key_level": "neutral",
-            "spike_dump": "neutral",
-            "messages": [f"{sym}: Signal data unavailable."],
-        }
-
-if show_ai_panel:
-    render_sg2_flow_matrix(all_signal_results)
-
-    selected_signal_result = all_signal_results.get(
-        symbol,
-        {
-            "symbol": symbol,
-            "messages": [f"{symbol}: Signal data unavailable."],
-        },
-    )
-
-    render_signal_log(selected_signal_result)
-
-
-# ============================================================
 # DASHBOARD BIAS HELPERS
 # ============================================================
 
@@ -1621,6 +1570,61 @@ st.plotly_chart(
     ),
     width="stretch",
 )
+
+
+# ============================================================
+# SG2 FLOW MATRIX DISPLAY
+# ============================================================
+
+all_signal_results = {}
+
+st.caption("SG2 Flow Matrix for SPY / SPX / QQQ")
+
+matrix_status = st.empty()
+
+with st.spinner("Loading SG2 Flow Matrix..."):
+    matrix_symbols = ["SPY", "SPX", "QQQ"]
+
+for sym in matrix_symbols:
+    try:
+        if sym == symbol:
+            sym_flow_data = flow_data
+            sym_history_df = history_df
+        else:
+            sym_flow_data = load_expiration_flow(sym)
+            sym_history_df = append_snapshot(sym_flow_data)
+
+        all_signal_results[sym] = analyze_flow_signals(
+            history_df=sym_history_df,
+            symbol=sym,
+            flow_data=sym_flow_data,
+        )
+
+    except Exception as e:
+        print(f"SG2 matrix failed for {sym}: {e}")
+        all_signal_results[sym] = {
+            "symbol": sym,
+            "flow_cross": "neutral",
+            "flow_divergence": "neutral",
+            "key_level": "neutral",
+            "spike_dump": "neutral",
+            "messages": [f"{sym}: Signal data unavailable."],
+        }
+
+if show_ai_panel:
+    render_sg2_flow_matrix(all_signal_results)
+
+    selected_signal_result = all_signal_results.get(
+        symbol,
+        {
+            "symbol": symbol,
+            "messages": [f"{symbol}: Signal data unavailable."],
+        },
+    )
+
+    render_signal_log(selected_signal_result)
+
+
 
 
 # ============================================================
