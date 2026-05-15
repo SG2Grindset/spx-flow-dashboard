@@ -1,14 +1,15 @@
 # ============================================================
 # expiration_flow_dashboard.py
 # SPY / SPX / QQQ
-# All Expirations Signed Signed Delta Notional Flow vs 0DTE Signed Signed Delta Notional Flow
-# Public app version - Discord sending removed
+# Premium Flow Dashboard + Signed Delta Bias Metrics
+# Sends chart to Discord
 # ============================================================
 
 import os
+import time
+import tempfile
 from pathlib import Path
 from datetime import datetime
-from gamma_level_engine import build_gamma_delta_levels
 
 import requests
 import pandas as pd
@@ -29,6 +30,38 @@ load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 TRADIER_API_KEY = os.getenv("TRADIER_API_KEY")
 TRADIER_BASE_URL = os.getenv("TRADIER_BASE_URL", "https://api.tradier.com/v1")
+
+# Discord webhooks for this dashboard.
+# Add these to your .env:
+# DISCORD_WEBHOOK_SPY0DTE=https://discord.com/api/webhooks/...
+# DISCORD_WEBHOOK_SPX0DTE=https://discord.com/api/webhooks/...
+#
+# Hard fallbacks are included below for the two webhooks you supplied.
+EXPIRATION_FLOW_WEBHOOKS = {
+    "SPY": (
+        os.getenv("DISCORD_WEBHOOK_SPY0DTE", "").strip()
+        or os.getenv("EXPIRATION_FLOW_DISCORD_WEBHOOK", "").strip()
+        or "https://discord.com/api/webhooks/1504268965076271236/-9Sicy0nJaVzph6k8cO2bVPvTfIKHmV3GXr708-ozqFu8DFsA5kDXpiuxG_i_LH6Myqm"
+    ),
+    "SPX": (
+        os.getenv("DISCORD_WEBHOOK_SPX0DTE", "").strip()
+        or "https://discord.com/api/webhooks/1504519376039317687/HXSV_L7e6eeX-ibPj0RgGcBvOoviOIO6in-FF0N5-Uy_3u8moUbKOywyH1ZIFGUGh6hP"
+    ),
+    "QQQ": (
+        os.getenv("DISCORD_WEBHOOK_QQQ0DTE", "").strip()
+        or "https://discord.com/api/webhooks/1504593299401343008/GQMRqHnnRYxD-FCUsdG-Mz8ibvLBudteZcLy2cSQKv6HK8Z-jf0cSZTY1QHGicJpvMc8"
+    ),
+}
+
+
+def get_expiration_flow_webhook(symbol):
+    return EXPIRATION_FLOW_WEBHOOKS.get(symbol.upper().strip(), "")
+
+
+print("Expiration flow webhook endings:", {
+    sym: (url[-16:] if url else "MISSING")
+    for sym, url in EXPIRATION_FLOW_WEBHOOKS.items()
+})
 
 HEADERS = {
     "Authorization": f"Bearer {TRADIER_API_KEY}",
@@ -97,7 +130,7 @@ section[data-testid="stSidebar"] {
 """, unsafe_allow_html=True)
 
 st.title("🟢 Expiration Flow Dashboard")
-st.caption("0DTE Signed Signed Delta Notional Flow vs All Expirations Signed Signed Delta Notional Flow")
+st.caption("Premium Flow Chart with Signed Delta Bias, Delta Ratio, and Gamma Context")
 
 
 # ============================================================
@@ -110,6 +143,12 @@ symbol = st.sidebar.selectbox(
     "Symbol",
     SYMBOLS,
     index=0,
+)
+
+discord_symbols = st.sidebar.multiselect(
+    "Discord Symbols To Send",
+    SYMBOLS,
+    default=["SPY", "SPX", "QQQ"],
 )
 
 auto_refresh = st.sidebar.checkbox("Auto Refresh", value=True)
@@ -150,9 +189,9 @@ show_flow_dots = st.sidebar.checkbox(
 flow_dot_threshold = st.sidebar.number_input(
     "FLOW Dot Threshold",
     min_value=0,
-    value=100_000_000,
-    step=25_000_000,
-    help="Dot fires when signed delta notional flow crosses above/below this threshold. Use 0 for simple zero-line crosses.",
+    value=25_000_000,
+    step=5_000_000,
+    help="Dot fires when PREMIUM flow crosses above/below this threshold. Use 0 for simple zero-line crosses.",
 )
 
 chain_width = st.sidebar.slider(
@@ -163,17 +202,27 @@ chain_width = st.sidebar.slider(
     step=25,
 )
 
+send_now = st.sidebar.button("Send To Discord Now")
 
-
-st.sidebar.markdown("---")
-st.sidebar.caption(
-    "Public app mode: chart controls are session-based. "
-    "Changing sliders here will not change another viewer's open session."
+auto_send_discord = st.sidebar.checkbox(
+    "Auto Send To Discord Every 60 Seconds",
+    value=False,
 )
 
 st.sidebar.caption(
-    "Flow model: Signed Delta Notional = Spot × Delta × Contracts × 100."
+    "Primary chart model: Premium Flow = Option Price × Contracts × 100."
 )
+st.sidebar.caption(
+    "Secondary bias model: Signed Delta Notional = Spot × Delta × Contracts × 100."
+)
+
+reset_history = st.sidebar.button("Reset Session History")
+
+st.sidebar.caption("Expiration webhook endings:")
+st.sidebar.caption({
+    sym: (get_expiration_flow_webhook(sym)[-16:] if get_expiration_flow_webhook(sym) else "MISSING")
+    for sym in SYMBOLS
+})
 
 if auto_refresh:
     st_autorefresh(
@@ -200,6 +249,10 @@ def reset_symbol_history(symbol):
     if file_path.exists():
         file_path.unlink()
 
+
+if reset_history:
+    reset_symbol_history(symbol)
+    st.sidebar.success(f"{symbol} expiration flow history reset.")
 
 
 # ============================================================
@@ -429,20 +482,18 @@ def filter_near_spot(df, spot, width):
 
 def calculate_net_flow(chain_df, spot_price):
     """
-    Signed delta notional model:
-        Signed Delta Notional = Spot Price * Delta * Contracts * 100
+    HYBRID FLOW MODEL
 
-    Calls usually have positive delta.
-    Puts usually have negative delta.
+    Primary chart model:
+        Premium Flow = Option Price × Contracts × 100
 
-    This keeps directional pressure intact:
-        Bullish pressure = positive signed delta notional
-        Bearish pressure = negative signed delta notional
+    Secondary bias model:
+        Signed Delta Notional = Spot × Delta × Contracts × 100
 
-    For display:
-        call_premium = positive signed call delta notional
-        put_premium  = absolute value of signed put delta notional
-        net_premium  = total signed delta notional
+    The chart stays on premium flow because it gives cleaner intraday
+    momentum/squeeze/exhaustion structure.
+
+    The signed delta values are used as confirmation metrics.
     """
 
     if chain_df is None or chain_df.empty:
@@ -450,6 +501,12 @@ def calculate_net_flow(chain_df, spot_price):
             "call_premium": 0,
             "put_premium": 0,
             "net_premium": 0,
+            "call_delta_notional": 0,
+            "put_delta_notional": 0,
+            "signed_delta_net": 0,
+            "delta_ratio": 0,
+            "delta_bias": "NEUTRAL",
+            "dealer_bias": "MIXED",
             "rows": 0,
         }
 
@@ -465,15 +522,35 @@ def calculate_net_flow(chain_df, spot_price):
         errors="coerce",
     ).fillna(0)
 
-    # If volume is zero/missing, fall back to open interest.
     df.loc[df["activity"] <= 0, "activity"] = df["open_interest"]
+
+    # ========================================================
+    # PREMIUM FLOW - PRIMARY CHART MODEL
+    # ========================================================
+
+    df["last"] = pd.to_numeric(
+        df.get("last", 0),
+        errors="coerce",
+    ).fillna(0)
+
+    df["premium"] = df["last"] * df["activity"] * 100
+
+    calls = df[df["type"].str.contains("call", na=False)].copy()
+    puts = df[df["type"].str.contains("put", na=False)].copy()
+
+    call_premium = calls["premium"].sum()
+    put_premium = puts["premium"].sum()
+    net_premium = call_premium - put_premium
+
+    # ========================================================
+    # SIGNED DELTA NOTIONAL - CONFIRMATION MODEL
+    # ========================================================
 
     df["delta"] = pd.to_numeric(
         df.get("delta", 0),
         errors="coerce",
     ).fillna(0)
 
-    # Signed exposure. Calls are usually positive, puts are usually negative.
     df["signed_delta_notional"] = (
         float(spot_price)
         * df["delta"]
@@ -481,20 +558,46 @@ def calculate_net_flow(chain_df, spot_price):
         * 100
     )
 
-    calls = df[df["type"].str.contains("call", na=False)]
-    puts = df[df["type"].str.contains("put", na=False)]
+    calls_delta = df[df["type"].str.contains("call", na=False)]["signed_delta_notional"].sum()
+    puts_delta_signed = df[df["type"].str.contains("put", na=False)]["signed_delta_notional"].sum()
 
-    call_premium = calls["signed_delta_notional"].sum()
+    call_delta_notional = calls_delta
+    put_delta_notional = abs(puts_delta_signed)
+    signed_delta_net = df["signed_delta_notional"].sum()
 
-    # Keep put metric positive for easier reading, but net uses signed total.
-    put_premium = abs(puts["signed_delta_notional"].sum())
+    total_delta = abs(call_delta_notional) + abs(put_delta_notional)
 
-    net_premium = df["signed_delta_notional"].sum()
+    if total_delta > 0:
+        delta_ratio = signed_delta_net / total_delta * 100
+    else:
+        delta_ratio = 0
+
+    if delta_ratio >= 35:
+        delta_bias = "BULLISH"
+        dealer_bias = "CALL PRESSURE"
+    elif delta_ratio <= -35:
+        delta_bias = "BEARISH"
+        dealer_bias = "PUT PRESSURE"
+    elif delta_ratio >= 10:
+        delta_bias = "LEAN BULLISH"
+        dealer_bias = "CALL LEAN"
+    elif delta_ratio <= -10:
+        delta_bias = "LEAN BEARISH"
+        dealer_bias = "PUT LEAN"
+    else:
+        delta_bias = "NEUTRAL"
+        dealer_bias = "MIXED"
 
     return {
         "call_premium": call_premium,
         "put_premium": put_premium,
         "net_premium": net_premium,
+        "call_delta_notional": call_delta_notional,
+        "put_delta_notional": put_delta_notional,
+        "signed_delta_net": signed_delta_net,
+        "delta_ratio": delta_ratio,
+        "delta_bias": delta_bias,
+        "dealer_bias": dealer_bias,
         "rows": len(df),
     }
 
@@ -580,8 +683,7 @@ def load_expiration_flow(symbol):
 
     zero_flow = calculate_net_flow(zero_dte_chain, spot)
     all_flow = calculate_net_flow(all_chain, spot)
-    gamma_result = build_gamma_delta_levels(all_chain, spot)
-    gamma_levels = gamma_result.get("levels", {})
+    gamma_levels = get_gamma_levels(all_chain)
 
     return {
         "symbol": symbol,
@@ -611,9 +713,13 @@ def append_snapshot(flow_data):
         "zero_dte_call_premium": flow_data["zero_dte"]["call_premium"],
         "zero_dte_put_premium": flow_data["zero_dte"]["put_premium"],
         "zero_dte_net_premium": flow_data["zero_dte"]["net_premium"],
+        "zero_dte_signed_delta_net": flow_data["zero_dte"].get("signed_delta_net", 0),
+        "zero_dte_delta_ratio": flow_data["zero_dte"].get("delta_ratio", 0),
         "all_exp_call_premium": flow_data["all_exp"]["call_premium"],
         "all_exp_put_premium": flow_data["all_exp"]["put_premium"],
         "all_exp_net_premium": flow_data["all_exp"]["net_premium"],
+        "all_exp_signed_delta_net": flow_data["all_exp"].get("signed_delta_net", 0),
+        "all_exp_delta_ratio": flow_data["all_exp"].get("delta_ratio", 0),
         "zero_dte_rows": flow_data["zero_dte"]["rows"],
         "all_exp_rows": flow_data["all_exp"]["rows"],
     }
@@ -948,7 +1054,7 @@ def flow_comparison_chart(history_df, symbol, flow_data):
             type="category",
         ),
         yaxis=dict(
-            title=dict(text="Signed Delta Notional Flow", font=dict(color="#facc15", size=16)),
+            title=dict(text="Premium Flow", font=dict(color="#facc15", size=16)),
             side="left",
             range=flow_range,
             showgrid=True,
@@ -981,6 +1087,61 @@ def flow_comparison_chart(history_df, symbol, flow_data):
 
 
 # ============================================================
+# DISCORD
+# ============================================================
+
+def send_expiration_flow_to_discord(history_df, symbol, flow_data):
+    webhook_url = get_expiration_flow_webhook(symbol)
+
+    if not webhook_url:
+        print(f"Missing Discord webhook for {symbol}.")
+        return False
+
+    print(f"{symbol} expiration webhook ending:", webhook_url[-16:])
+
+    try:
+        fig = flow_comparison_chart(history_df, symbol, flow_data)
+
+        image_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        image_path = image_file.name
+        image_file.close()
+
+        fig.write_image(
+            image_path,
+            width=1800,
+            height=1000,
+            scale=2,
+        )
+
+        with open(image_path, "rb") as f:
+            response = requests.post(
+                webhook_url,
+                files={
+                    "file": (
+                        f"{symbol}_expiration_flow.png",
+                        f,
+                        "image/png",
+                    )
+                },
+                timeout=30,
+            )
+
+        try:
+            os.remove(image_path)
+        except Exception:
+            pass
+
+        print(f"{symbol} Expiration Flow Discord status:", response.status_code, response.text)
+
+        return response.status_code in [200, 204]
+
+    except Exception as e:
+        print(f"{symbol} Expiration Flow Discord send failed:")
+        print(e)
+        return False
+
+
+# ============================================================
 # LOAD DATA
 # ============================================================
 
@@ -995,36 +1156,185 @@ except Exception as e:
 
 
 # ============================================================
+# DISCORD SEND LOGIC
+# ============================================================
+
+if "last_exp_flow_discord_send" not in st.session_state:
+    st.session_state.last_exp_flow_discord_send = 0
+
+EXP_FLOW_DISCORD_INTERVAL_SECONDS = 60
+
+seconds_since_exp_flow_send = (
+    time.time() - st.session_state.last_exp_flow_discord_send
+)
+
+should_auto_send_exp_flow = (
+    auto_send_discord
+    and seconds_since_exp_flow_send >= EXP_FLOW_DISCORD_INTERVAL_SECONDS
+)
+
+if send_now or should_auto_send_exp_flow:
+    send_results = []
+
+    for sym in discord_symbols:
+        try:
+            if sym == symbol:
+                sym_flow_data = flow_data
+                sym_history_df = history_df
+            else:
+                sym_flow_data = load_expiration_flow(sym)
+                sym_history_df = append_snapshot(sym_flow_data)
+
+            ok = send_expiration_flow_to_discord(
+                history_df=sym_history_df,
+                symbol=sym,
+                flow_data=sym_flow_data,
+            )
+
+            send_results.append(f"{sym}: {'OK' if ok else 'FAILED'}")
+
+        except Exception as e:
+            print(f"{sym} expiration flow failed:")
+            print(e)
+            send_results.append(f"{sym}: FAILED")
+
+    st.session_state.last_exp_flow_discord_send = time.time()
+
+    discord_status = " | ".join(send_results)
+
+    if "FAILED" in discord_status:
+        st.warning(discord_status)
+    else:
+        st.success(discord_status)
+
+
+# ============================================================
+# DASHBOARD BIAS HELPERS
+# ============================================================
+
+def bias_color_text(value):
+    try:
+        value = float(value)
+    except Exception:
+        return "NEUTRAL"
+
+    if value >= 35:
+        return "BULLISH"
+    if value <= -35:
+        return "BEARISH"
+    if value >= 10:
+        return "LEAN BULLISH"
+    if value <= -10:
+        return "LEAN BEARISH"
+
+    return "NEUTRAL"
+
+
+def gamma_regime_text(spot, gamma_levels):
+    try:
+        spot = float(spot)
+    except Exception:
+        return "N/A"
+
+    call_level = gamma_levels.get("top_call_gamma")
+    put_level = gamma_levels.get("top_put_gamma")
+
+    try:
+        call_level = float(call_level) if call_level else None
+    except Exception:
+        call_level = None
+
+    try:
+        put_level = float(put_level) if put_level else None
+    except Exception:
+        put_level = None
+
+    if call_level and spot > call_level:
+        return "ABOVE CALL GAMMA"
+
+    if put_level and spot < put_level:
+        return "BELOW PUT GAMMA"
+
+    if call_level and put_level:
+        low = min(call_level, put_level)
+        high = max(call_level, put_level)
+
+        if low <= spot <= high:
+            return "INSIDE GAMMA RANGE"
+
+    return "NEUTRAL"
+
+
+# ============================================================
 # DISPLAY METRICS
 # ============================================================
 
 gamma_levels = flow_data.get("gamma_levels", {})
 
+zero_delta_ratio = flow_data["zero_dte"].get("delta_ratio", 0)
+all_delta_ratio = flow_data["all_exp"].get("delta_ratio", 0)
+
+zero_delta_bias = flow_data["zero_dte"].get(
+    "delta_bias",
+    bias_color_text(zero_delta_ratio),
+)
+
+all_delta_bias = flow_data["all_exp"].get(
+    "delta_bias",
+    bias_color_text(all_delta_ratio),
+)
+
+gamma_regime = gamma_regime_text(
+    flow_data["spot"],
+    gamma_levels,
+)
+
 m1, m2, m3, m4, m5, m6 = st.columns(6)
 
 m1.metric("Symbol", symbol)
 m2.metric("Spot", fmt(flow_data["spot"]))
-m3.metric("0DTE Signed Delta", money_fmt(flow_data["zero_dte"]["net_premium"]))
-m4.metric("All Exp Signed Delta", money_fmt(flow_data["all_exp"]["net_premium"]))
+m3.metric("0DTE Premium Net", money_fmt(flow_data["zero_dte"]["net_premium"]))
+m4.metric("All Exp Premium Net", money_fmt(flow_data["all_exp"]["net_premium"]))
 m5.metric(
-    "Call Wall",
-    fmt(gamma_levels.get("call_wall"))
-    if gamma_levels.get("call_wall")
+    "Call Gamma",
+    fmt(gamma_levels.get("top_call_gamma"))
+    if gamma_levels.get("top_call_gamma")
     else "N/A",
 )
-
 m6.metric(
-    "Put Wall",
-    fmt(gamma_levels.get("put_wall"))
-    if gamma_levels.get("put_wall")
+    "Put Gamma",
+    fmt(gamma_levels.get("top_put_gamma"))
+    if gamma_levels.get("top_put_gamma")
     else "N/A",
 )
 
-m7, m8, m9 = st.columns(3)
+m7, m8, m9, m10 = st.columns(4)
 
-m7.metric("0DTE Rows", flow_data["zero_dte"]["rows"])
-m8.metric("All Exp Rows", flow_data["all_exp"]["rows"])
-m9.metric("0DTE Exp", flow_data["today_exp"])
+m7.metric(
+    "0DTE Signed Delta",
+    money_fmt(flow_data["zero_dte"].get("signed_delta_net", 0)),
+)
+
+m8.metric(
+    "0DTE Delta Bias",
+    f"{zero_delta_bias} {zero_delta_ratio:.0f}%",
+)
+
+m9.metric(
+    "All Exp Delta Bias",
+    f"{all_delta_bias} {all_delta_ratio:.0f}%",
+)
+
+m10.metric(
+    "Gamma Regime",
+    gamma_regime,
+)
+
+m11, m12, m13 = st.columns(3)
+
+m11.metric("0DTE Rows", flow_data["zero_dte"]["rows"])
+m12.metric("All Exp Rows", flow_data["all_exp"]["rows"])
+m13.metric("0DTE Exp", flow_data["today_exp"])
 
 
 # ============================================================
@@ -1045,8 +1355,8 @@ st.plotly_chart(
 # RAW DATA
 # ============================================================
 
-with st.expander("Advanced: Expiration Flow Data"):
+with st.expander("Expiration Flow Data"):
     st.json(flow_data)
 
-with st.expander("Advanced: Session History"):
+with st.expander("Session History"):
     st.dataframe(history_df, width="stretch")
