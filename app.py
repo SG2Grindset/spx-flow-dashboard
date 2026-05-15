@@ -1,7 +1,7 @@
 # ============================================================
 # expiration_flow_dashboard.py
 # SPY / SPX / QQQ
-# All Expirations Net Flow vs 0DTE Net Flow
+# All Expirations Delta Notional Flow vs 0DTE Delta Notional Flow
 # Public app version - Discord sending removed
 # ============================================================
 
@@ -96,7 +96,7 @@ section[data-testid="stSidebar"] {
 """, unsafe_allow_html=True)
 
 st.title("🟢 Expiration Flow Dashboard")
-st.caption("0DTE Net Flow vs All Expirations Net Flow")
+st.caption("0DTE Delta Notional Flow vs All Expirations Delta Notional Flow")
 
 
 # ============================================================
@@ -149,9 +149,9 @@ show_flow_dots = st.sidebar.checkbox(
 flow_dot_threshold = st.sidebar.number_input(
     "FLOW Dot Threshold",
     min_value=0,
-    value=25_000_000,
-    step=5_000_000,
-    help="Dot fires when flow crosses above/below this threshold. Use 0 for simple zero-line crosses.",
+    value=100_000_000,
+    step=25_000_000,
+    help="Dot fires when delta notional flow crosses above/below this threshold. Use 0 for simple zero-line crosses.",
 )
 
 chain_width = st.sidebar.slider(
@@ -168,6 +168,10 @@ st.sidebar.markdown("---")
 st.sidebar.caption(
     "Public app mode: chart controls are session-based. "
     "Changing sliders here will not change another viewer's open session."
+)
+
+st.sidebar.caption(
+    "Flow model: Delta Notional = Spot × |Delta| × Contracts × 100."
 )
 
 if auto_refresh:
@@ -422,7 +426,16 @@ def filter_near_spot(df, spot, width):
     ].copy()
 
 
-def calculate_net_flow(chain_df):
+def calculate_net_flow(chain_df, spot_price):
+    """
+    Delta notional model:
+    Delta Notional = Spot Price * ABS(Delta) * Contracts * 100
+
+    Calls are treated as positive exposure.
+    Puts are treated as negative exposure through net calculation:
+        Net = Call Delta Notional - Put Delta Notional
+    """
+
     if chain_df is None or chain_df.empty:
         return {
             "call_premium": 0,
@@ -443,20 +456,26 @@ def calculate_net_flow(chain_df):
         errors="coerce",
     ).fillna(0)
 
+    # If volume is zero/missing, fall back to open interest.
     df.loc[df["activity"] <= 0, "activity"] = df["open_interest"]
 
-    df["last"] = pd.to_numeric(
-        df.get("last", 0),
+    df["delta"] = pd.to_numeric(
+        df.get("delta", 0),
         errors="coerce",
     ).fillna(0)
 
-    df["premium"] = df["last"] * df["activity"] * 100
+    df["delta_notional"] = (
+        float(spot_price)
+        * df["delta"].abs()
+        * df["activity"]
+        * 100
+    )
 
     calls = df[df["type"].str.contains("call", na=False)]
     puts = df[df["type"].str.contains("put", na=False)]
 
-    call_premium = calls["premium"].sum()
-    put_premium = puts["premium"].sum()
+    call_premium = calls["delta_notional"].sum()
+    put_premium = puts["delta_notional"].sum()
     net_premium = call_premium - put_premium
 
     return {
@@ -546,8 +565,8 @@ def load_expiration_flow(symbol):
     else:
         all_chain = pd.DataFrame()
 
-    zero_flow = calculate_net_flow(zero_dte_chain)
-    all_flow = calculate_net_flow(all_chain)
+    zero_flow = calculate_net_flow(zero_dte_chain, spot)
+    all_flow = calculate_net_flow(all_chain, spot)
     gamma_levels = get_gamma_levels(all_chain)
 
     return {
@@ -915,7 +934,7 @@ def flow_comparison_chart(history_df, symbol, flow_data):
             type="category",
         ),
         yaxis=dict(
-            title=dict(text="Flow Premium", font=dict(color="#facc15", size=16)),
+            title=dict(text="Delta Notional Flow", font=dict(color="#facc15", size=16)),
             side="left",
             range=flow_range,
             showgrid=True,
@@ -971,8 +990,8 @@ m1, m2, m3, m4, m5, m6 = st.columns(6)
 
 m1.metric("Symbol", symbol)
 m2.metric("Spot", fmt(flow_data["spot"]))
-m3.metric("0DTE Net", money_fmt(flow_data["zero_dte"]["net_premium"]))
-m4.metric("All Exp Net", money_fmt(flow_data["all_exp"]["net_premium"]))
+m3.metric("0DTE Delta Net", money_fmt(flow_data["zero_dte"]["net_premium"]))
+m4.metric("All Exp Delta Net", money_fmt(flow_data["all_exp"]["net_premium"]))
 m5.metric(
     "Call Gamma",
     fmt(gamma_levels.get("top_call_gamma"))
