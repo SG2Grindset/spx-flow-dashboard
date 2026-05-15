@@ -8,6 +8,7 @@
 import os
 from pathlib import Path
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import requests
 import pandas as pd
@@ -25,6 +26,8 @@ from streamlit_autorefresh import st_autorefresh
 
 ENV_PATH = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=ENV_PATH, override=True)
+
+CENTRAL_TZ = ZoneInfo("America/Chicago")
 
 TRADIER_API_KEY = os.getenv("TRADIER_API_KEY")
 TRADIER_BASE_URL = os.getenv("TRADIER_BASE_URL", "https://api.tradier.com/v1")
@@ -96,7 +99,7 @@ section[data-testid="stSidebar"] {
 """, unsafe_allow_html=True)
 
 st.title("🟢 SG2 Premium Hybrid Flow Dashboard")
-st.caption("Premium Flow Chart with Signed Delta Bias, Delta Ratio, and Gamma Context")
+st.caption("Premium Flow Chart with Signed Delta Bias, Delta Ratio, and Gamma Context. Timeline shown in Central Time.")
 
 
 # ============================================================
@@ -188,7 +191,7 @@ if auto_refresh:
 # SESSION FILES
 # ============================================================
 
-SESSION_DIR = Path(__file__).parent / "expiration_flow_history"
+SESSION_DIR = Path(__file__).parent / "expiration_flow_history_v3"
 SESSION_DIR.mkdir(exist_ok=True)
 
 
@@ -653,10 +656,10 @@ def load_expiration_flow(symbol):
 def append_snapshot(flow_data):
     file_path = session_file(flow_data["symbol"])
 
-    now = datetime.now()
+    now = datetime.now(CENTRAL_TZ)
 
     row = {
-        "datetime": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "datetime": now.isoformat(),
         "time": now.strftime("%H:%M:%S"),
         "symbol": flow_data["symbol"],
         "spot": flow_data["spot"],
@@ -698,9 +701,16 @@ def normalize_history(df):
     df["datetime"] = pd.to_datetime(
         df.get("datetime", pd.NaT),
         errors="coerce",
+        utc=True,
     )
 
-    df = df.dropna(subset=["datetime"]).sort_values("datetime")
+    df = df.dropna(subset=["datetime"])
+
+    # Force all timestamps into Central Time.
+    # This fixes Streamlit Cloud using UTC/server time.
+    df["datetime"] = df["datetime"].dt.tz_convert(CENTRAL_TZ)
+
+    df = df.sort_values("datetime")
 
     return df
 
@@ -981,7 +991,7 @@ def flow_comparison_chart(history_df, symbol, flow_data):
     fig.update_layout(
         title=dict(
             text=(
-                f"<b>{symbol} {datetime.now().strftime('%A, %B %d, %Y')}</b><br>"
+                f"<b>{symbol} {datetime.now(CENTRAL_TZ).strftime('%A, %B %d, %Y')}</b><br>"
                 f"<span style='font-size:18px;'>"
                 f"0DTE Exp: {flow_data['today_exp']} | "
                 f"All Exp Used: {len(flow_data['expirations_used'])} | "
@@ -1000,9 +1010,10 @@ def flow_comparison_chart(history_df, symbol, flow_data):
             showgrid=True,
             gridcolor="rgba(255,255,255,0.16)",
             tickfont=dict(color="white", size=14, family="Arial Black"),
-            nticks=10,
+            nticks=8,
             type="date",
-            tickformat="%H:%M",
+            tickformat="%I:%M %p",
+            tickangle=0,
         ),
         yaxis=dict(
             title=dict(text="Premium Flow", font=dict(color="#facc15", size=16)),
