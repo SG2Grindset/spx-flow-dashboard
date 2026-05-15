@@ -1,6 +1,6 @@
 # ============================================================
 # expiration_flow_dashboard.py
-# SPY / SPX / QQQ
+# SPY / SPX / QQQ / TSLA
 # Premium Flow Dashboard + Signed Delta Bias Metrics
 # Public app version - Discord sending removed
 # ============================================================
@@ -166,14 +166,14 @@ section[data-testid="stSidebar"] {
 """, unsafe_allow_html=True)
 
 st.title("🟢 SG2 Flow AI Dashboard")
-st.caption("Premium Flow Chart + SG2 Flow Matrix + Signal Log. Timeline shown in Central Time.")
+st.caption("Premium Flow Chart + SG2 Flow Matrix + Signal Log for SPY / SPX / QQQ / TSLA. Timeline shown in Central Time.")
 
 
 # ============================================================
 # SIDEBAR
 # ============================================================
 
-SYMBOLS = ["SPY", "SPX", "QQQ"]
+SYMBOLS = ["SPY", "SPX", "QQQ", "TSLA"]
 
 symbol = st.sidebar.selectbox(
     "Symbol",
@@ -216,12 +216,28 @@ show_flow_dots = st.sidebar.checkbox(
     value=True,
 )
 
+# ============================================================
+# SYMBOL-SPECIFIC FLOW DOT DEFAULTS
+# ============================================================
+
+FLOW_DOT_DEFAULTS = {
+    "SPY": 25_000_000,
+    "QQQ": 25_000_000,
+    "TSLA": 75_000_000,
+    "SPX": 150_000_000,
+}
+
+default_flow_dot_threshold = FLOW_DOT_DEFAULTS.get(
+    symbol.upper(),
+    25_000_000,
+)
+
 flow_dot_threshold = st.sidebar.number_input(
     "FLOW Dot Threshold",
     min_value=0,
-    value=25_000_000,
+    value=default_flow_dot_threshold,
     step=5_000_000,
-    help="Dot fires when PREMIUM flow crosses above/below this threshold. Use 0 for simple zero-line crosses.",
+    help="Dot fires when premium FLOW Xes above/below this threshold. Use 0 for simple zero-line crosses.",
 )
 
 show_ai_panel = st.sidebar.checkbox(
@@ -238,11 +254,11 @@ divergence_threshold = st.sidebar.number_input(
 )
 
 spike_threshold = st.sidebar.number_input(
-    "Spike/Dump Threshold",
+    "Pulse/Drop Threshold",
     min_value=0,
     value=75_000_000,
     step=25_000_000,
-    help="Minimum one-bucket premium-flow change used to flag spike/dump signals.",
+    help="Minimum one-bucket premium-flow change used to flag pulse/drop signals.",
 )
 
 chain_width = st.sidebar.slider(
@@ -279,7 +295,7 @@ if auto_refresh:
 # SESSION FILES
 # ============================================================
 
-SESSION_DIR = Path(__file__).parent / "expiration_flow_history_v3"
+SESSION_DIR = Path(__file__).parent / "sg2_flow_ai_history_v2"
 SESSION_DIR.mkdir(exist_ok=True)
 
 
@@ -911,6 +927,46 @@ def flow_comparison_chart(history_df, symbol, flow_data):
     )
 
     # ========================================================
+    # KEY GAMMA LEVELS - PRICE AXIS
+    # ========================================================
+    gamma_levels = flow_data.get("gamma_levels", {}) or {}
+
+    call_gamma_level = gamma_levels.get("top_call_gamma")
+    put_gamma_level = gamma_levels.get("top_put_gamma")
+
+    try:
+        call_gamma_level = float(call_gamma_level) if call_gamma_level else None
+    except Exception:
+        call_gamma_level = None
+
+    try:
+        put_gamma_level = float(put_gamma_level) if put_gamma_level else None
+    except Exception:
+        put_gamma_level = None
+
+    if call_gamma_level:
+        fig.add_hline(
+            y=call_gamma_level,
+            line=dict(color="#22c55e", width=3, dash="dash"),
+            yref="y2",
+            annotation_text=f"Call Gamma {fmt(call_gamma_level)}",
+            annotation_position="top left",
+            annotation_font=dict(color="#22c55e", size=13, family="Arial Black"),
+            annotation_bgcolor="rgba(0,0,0,0.70)",
+        )
+
+    if put_gamma_level:
+        fig.add_hline(
+            y=put_gamma_level,
+            line=dict(color="#ef4444", width=3, dash="dash"),
+            yref="y2",
+            annotation_text=f"Put Gamma {fmt(put_gamma_level)}",
+            annotation_position="bottom left",
+            annotation_font=dict(color="#ef4444", size=13, family="Arial Black"),
+            annotation_bgcolor="rgba(0,0,0,0.70)",
+        )
+
+    # ========================================================
     # FLOW DOTS
     # ========================================================
     if show_flow_dots:
@@ -1068,6 +1124,33 @@ def flow_comparison_chart(history_df, symbol, flow_data):
     if price_span <= 0:
         if symbol.upper() == "SPX":
             price_span = 10
+        elif symbol.upper() == "TSLA":
+            price_span = 5
+        elif symbol.upper() == "QQQ":
+            price_span = 1
+        else:
+            price_span = 0.75
+
+    # Include key gamma levels in the right-side price scale.
+    gamma_levels_for_range = flow_data.get("gamma_levels", {}) or {}
+
+    for gamma_key in ["top_call_gamma", "top_put_gamma"]:
+        try:
+            gamma_value = gamma_levels_for_range.get(gamma_key)
+            if gamma_value:
+                gamma_value = float(gamma_value)
+                price_min = min(price_min, gamma_value)
+                price_max = max(price_max, gamma_value)
+        except Exception:
+            pass
+
+    price_span = price_max - price_min
+
+    if price_span <= 0:
+        if symbol.upper() == "SPX":
+            price_span = 10
+        elif symbol.upper() == "TSLA":
+            price_span = 5
         elif symbol.upper() == "QQQ":
             price_span = 1
         else:
@@ -1075,6 +1158,40 @@ def flow_comparison_chart(history_df, symbol, flow_data):
 
     price_pad = price_span * 0.35
     price_range = [price_min - price_pad, price_max + price_pad]
+
+    # ========================================================
+    # PRICE AXIS DOLLAR TICK SPACING
+    # ========================================================
+    if symbol.upper() == "SPX":
+        price_dtick = 5
+    elif symbol.upper() == "TSLA":
+        price_dtick = 2.5
+    elif symbol.upper() in ["SPY", "QQQ"]:
+        price_dtick = 0.5
+    else:
+        price_dtick = 1
+
+    # ========================================================
+    # FLOW UPDATE SUMMARY
+    # ========================================================
+    flow_update_text = (
+        f"0DTE Flow: {money_fmt(latest_zero)} | "
+        f"All Exp Flow: {money_fmt(latest_all)}"
+    )
+
+    fig.add_annotation(
+        xref="paper",
+        yref="paper",
+        x=0.01,
+        y=1.06,
+        text=f"<b>{flow_update_text}</b>",
+        showarrow=False,
+        align="left",
+        font=dict(color="#facc15", size=15, family="Arial Black"),
+        bgcolor="rgba(0,0,0,0.55)",
+        bordercolor="rgba(250,204,21,0.55)",
+        borderwidth=1,
+    )
 
     fig.update_layout(
         title=dict(
@@ -1120,6 +1237,7 @@ def flow_comparison_chart(history_df, symbol, flow_data):
             side="right",
             range=price_range,
             showgrid=False,
+            dtick=price_dtick,
             tickfont=dict(color="#ffffff", size=15, family="Arial Black"),
         ),
         legend=dict(
@@ -1166,10 +1284,10 @@ def analyze_flow_signals(history_df, symbol, flow_data):
 
     empty_result = {
         "symbol": symbol,
-        "flow_cross": "neutral",
-        "flow_divergence": "neutral",
-        "key_level": "neutral",
-        "spike_dump": "neutral",
+        "flow_x": "neutral",
+        "divergence": "neutral",
+        "gamma_level": "neutral",
+        "pulse_drop": "neutral",
         "messages": [],
     }
 
@@ -1199,30 +1317,30 @@ def analyze_flow_signals(history_df, symbol, flow_data):
     all_change = all_now - all_prev
     price_change = price_now - price_prev
 
-    flow_cross = "neutral"
+    flow_x = "neutral"
 
     if zero_now > all_now and zero_prev <= all_prev:
-        flow_cross = "bull"
-        messages.append(f"{symbol}: Bullish flow cross — 0DTE premium flow crossed above all-exp flow.")
+        flow_x = "bull"
+        messages.append(f"{symbol}: Bullish FLOW X — 0DTE premium FLOW Xed above all-exp flow.")
     elif zero_now < all_now and zero_prev >= all_prev:
-        flow_cross = "bear"
-        messages.append(f"{symbol}: Bearish flow cross — 0DTE premium flow crossed below all-exp flow.")
+        flow_x = "bear"
+        messages.append(f"{symbol}: Bearish FLOW X — 0DTE premium FLOW Xed below all-exp flow.")
     elif zero_now > all_now and zero_change > 0:
-        flow_cross = "bull"
+        flow_x = "bull"
     elif zero_now < all_now and zero_change < 0:
-        flow_cross = "bear"
+        flow_x = "bear"
 
-    flow_divergence = "neutral"
+    divergence = "neutral"
 
     if price_change < 0 and zero_change > divergence_threshold:
-        flow_divergence = "bull"
+        divergence = "bull"
         messages.append(f"{symbol}: Bullish divergence — price slipped while 0DTE flow improved.")
     elif price_change > 0 and zero_change < -divergence_threshold:
-        flow_divergence = "bear"
+        divergence = "bear"
         messages.append(f"{symbol}: Bearish divergence — price rose while 0DTE flow weakened.")
 
     gamma_levels = flow_data.get("gamma_levels", {})
-    key_level = "neutral"
+    gamma_level = "neutral"
 
     call_level = gamma_levels.get("top_call_gamma")
     put_level = gamma_levels.get("top_put_gamma")
@@ -1238,26 +1356,26 @@ def analyze_flow_signals(history_df, symbol, flow_data):
         put_level = None
 
     if call_level and price_now > call_level and price_prev <= call_level:
-        key_level = "bull"
+        gamma_level = "bull"
         messages.append(f"{symbol}: Key level reclaim — price crossed above call gamma {call_level:.2f}.")
     elif put_level and price_now < put_level and price_prev >= put_level:
-        key_level = "bear"
+        gamma_level = "bear"
         messages.append(f"{symbol}: Key level break — price crossed below put gamma {put_level:.2f}.")
     elif call_level and price_now > call_level:
-        key_level = "bull"
+        gamma_level = "bull"
     elif put_level and price_now < put_level:
-        key_level = "bear"
+        gamma_level = "bear"
     elif call_level and put_level:
-        key_level = "warn"
+        gamma_level = "warn"
 
-    spike_dump = "neutral"
+    pulse_drop = "neutral"
 
     if zero_change >= spike_threshold and all_change >= 0:
-        spike_dump = "bull"
-        messages.append(f"{symbol}: Flow spike — 0DTE premium flow jumped {money_fmt(zero_change)}.")
+        pulse_drop = "bull"
+        messages.append(f"{symbol}: Pulse — 0DTE premium flow jumped {money_fmt(zero_change)}.")
     elif zero_change <= -spike_threshold and all_change <= 0:
-        spike_dump = "bear"
-        messages.append(f"{symbol}: Flow dump — 0DTE premium flow dropped {money_fmt(zero_change)}.")
+        pulse_drop = "bear"
+        messages.append(f"{symbol}: Drop — 0DTE premium flow dropped {money_fmt(zero_change)}.")
 
     zero_bias = flow_data["zero_dte"].get("delta_bias", "NEUTRAL")
     zero_ratio = flow_data["zero_dte"].get("delta_ratio", 0)
@@ -1270,10 +1388,10 @@ def analyze_flow_signals(history_df, symbol, flow_data):
 
     return {
         "symbol": symbol,
-        "flow_cross": flow_cross,
-        "flow_divergence": flow_divergence,
-        "key_level": key_level,
-        "spike_dump": spike_dump,
+        "flow_x": flow_x,
+        "divergence": divergence,
+        "gamma_level": gamma_level,
+        "pulse_drop": pulse_drop,
         "messages": messages,
     }
 
@@ -1282,10 +1400,10 @@ def render_sg2_flow_matrix(signal_result):
     st.markdown("### 🧠 SG2 FLOW AI SIGNAL MATRIX")
 
     rows = [
-        ("Flow Cross", signal_result["flow_cross"]),
-        ("Flow Divergence", signal_result["flow_divergence"]),
-        ("Key Level", signal_result["key_level"]),
-        ("Spike/Dump", signal_result["spike_dump"]),
+        ("FLOW X", signal_result["flow_x"]),
+        ("Divergence", signal_result["divergence"]),
+        ("Gamma Level", signal_result["gamma_level"]),
+        ("Pulse/Drop", signal_result["pulse_drop"]),
     ]
 
     data = []
