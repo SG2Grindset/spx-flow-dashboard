@@ -1,7 +1,7 @@
 # ============================================================
 # expiration_flow_dashboard.py
 # SPY / SPX / QQQ
-# All Expirations Delta Notional Flow vs 0DTE Delta Notional Flow
+# All Expirations Signed Signed Delta Notional Flow vs 0DTE Signed Signed Delta Notional Flow
 # Public app version - Discord sending removed
 # ============================================================
 
@@ -96,7 +96,7 @@ section[data-testid="stSidebar"] {
 """, unsafe_allow_html=True)
 
 st.title("🟢 Expiration Flow Dashboard")
-st.caption("0DTE Delta Notional Flow vs All Expirations Delta Notional Flow")
+st.caption("0DTE Signed Signed Delta Notional Flow vs All Expirations Signed Signed Delta Notional Flow")
 
 
 # ============================================================
@@ -151,7 +151,7 @@ flow_dot_threshold = st.sidebar.number_input(
     min_value=0,
     value=100_000_000,
     step=25_000_000,
-    help="Dot fires when delta notional flow crosses above/below this threshold. Use 0 for simple zero-line crosses.",
+    help="Dot fires when signed delta notional flow crosses above/below this threshold. Use 0 for simple zero-line crosses.",
 )
 
 chain_width = st.sidebar.slider(
@@ -171,7 +171,7 @@ st.sidebar.caption(
 )
 
 st.sidebar.caption(
-    "Flow model: Delta Notional = Spot × |Delta| × Contracts × 100."
+    "Flow model: Signed Delta Notional = Spot × Delta × Contracts × 100."
 )
 
 if auto_refresh:
@@ -428,12 +428,20 @@ def filter_near_spot(df, spot, width):
 
 def calculate_net_flow(chain_df, spot_price):
     """
-    Delta notional model:
-    Delta Notional = Spot Price * ABS(Delta) * Contracts * 100
+    Signed delta notional model:
+        Signed Delta Notional = Spot Price * Delta * Contracts * 100
 
-    Calls are treated as positive exposure.
-    Puts are treated as negative exposure through net calculation:
-        Net = Call Delta Notional - Put Delta Notional
+    Calls usually have positive delta.
+    Puts usually have negative delta.
+
+    This keeps directional pressure intact:
+        Bullish pressure = positive signed delta notional
+        Bearish pressure = negative signed delta notional
+
+    For display:
+        call_premium = positive signed call delta notional
+        put_premium  = absolute value of signed put delta notional
+        net_premium  = total signed delta notional
     """
 
     if chain_df is None or chain_df.empty:
@@ -464,9 +472,10 @@ def calculate_net_flow(chain_df, spot_price):
         errors="coerce",
     ).fillna(0)
 
-    df["delta_notional"] = (
+    # Signed exposure. Calls are usually positive, puts are usually negative.
+    df["signed_delta_notional"] = (
         float(spot_price)
-        * df["delta"].abs()
+        * df["delta"]
         * df["activity"]
         * 100
     )
@@ -474,9 +483,12 @@ def calculate_net_flow(chain_df, spot_price):
     calls = df[df["type"].str.contains("call", na=False)]
     puts = df[df["type"].str.contains("put", na=False)]
 
-    call_premium = calls["delta_notional"].sum()
-    put_premium = puts["delta_notional"].sum()
-    net_premium = call_premium - put_premium
+    call_premium = calls["signed_delta_notional"].sum()
+
+    # Keep put metric positive for easier reading, but net uses signed total.
+    put_premium = abs(puts["signed_delta_notional"].sum())
+
+    net_premium = df["signed_delta_notional"].sum()
 
     return {
         "call_premium": call_premium,
@@ -934,7 +946,7 @@ def flow_comparison_chart(history_df, symbol, flow_data):
             type="category",
         ),
         yaxis=dict(
-            title=dict(text="Delta Notional Flow", font=dict(color="#facc15", size=16)),
+            title=dict(text="Signed Delta Notional Flow", font=dict(color="#facc15", size=16)),
             side="left",
             range=flow_range,
             showgrid=True,
@@ -990,8 +1002,8 @@ m1, m2, m3, m4, m5, m6 = st.columns(6)
 
 m1.metric("Symbol", symbol)
 m2.metric("Spot", fmt(flow_data["spot"]))
-m3.metric("0DTE Delta Net", money_fmt(flow_data["zero_dte"]["net_premium"]))
-m4.metric("All Exp Delta Net", money_fmt(flow_data["all_exp"]["net_premium"]))
+m3.metric("0DTE Signed Delta", money_fmt(flow_data["zero_dte"]["net_premium"]))
+m4.metric("All Exp Signed Delta", money_fmt(flow_data["all_exp"]["net_premium"]))
 m5.metric(
     "Call Gamma",
     fmt(gamma_levels.get("top_call_gamma"))
