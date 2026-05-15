@@ -43,7 +43,7 @@ HEADERS = {
 # ============================================================
 
 st.set_page_config(
-    page_title="SG2 Premium Hybrid Flow Dashboard",
+    page_title="SG2 Flow AI Dashboard",
     page_icon="🟢",
     layout="wide",
 )
@@ -95,11 +95,78 @@ section[data-testid="stSidebar"] {
     font-size: 30px !important;
     text-shadow: 0 0 10px rgba(255,255,255,0.25);
 }
+
+.sg2-panel {
+    background: linear-gradient(145deg,#111827,#0b0f14);
+    border: 1px solid rgba(250,204,21,0.35);
+    border-radius: 18px;
+    padding: 16px 18px;
+    margin: 8px 0 18px 0;
+    box-shadow: 0 0 22px rgba(0,0,0,0.45);
+}
+.sg2-title {
+    color: #f59e0b;
+    font-weight: 900;
+    font-size: 20px;
+    letter-spacing: 1px;
+}
+.sg2-subtitle {
+    color: #9ca3af;
+    font-weight: 800;
+    font-size: 15px;
+    margin-left: 18px;
+}
+.sg2-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+.sg2-table th {
+    color: #a3e635;
+    text-align: center;
+    font-size: 17px;
+    padding: 8px;
+}
+.sg2-table td {
+    padding: 9px 8px;
+    font-size: 16px;
+    font-weight: 800;
+}
+.sg2-label {
+    color: #c084fc;
+    width: 42%;
+}
+.sg2-cell {
+    text-align: center;
+    font-size: 20px !important;
+}
+.sg2-log {
+    background: #0b0f14;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    font-family: "Segoe UI", sans-serif;
+}
+.sg2-log-title {
+    color: #facc15;
+    font-size: 17px;
+    font-weight: 900;
+    margin-bottom: 8px;
+}
+.sg2-log-line {
+    color: #ffffff;
+    font-size: 14px;
+    line-height: 1.55;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    padding: 5px 0;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🟢 SG2 Premium Hybrid Flow Dashboard")
-st.caption("Premium Flow Chart with Signed Delta Bias, Delta Ratio, and Gamma Context. Timeline shown in Central Time.")
+st.title("🟢 SG2 Flow AI Dashboard")
+st.caption("Premium Flow Chart + SG2 Flow Matrix + Signal Log. Timeline shown in Central Time.")
 
 
 # ============================================================
@@ -155,6 +222,27 @@ flow_dot_threshold = st.sidebar.number_input(
     value=25_000_000,
     step=5_000_000,
     help="Dot fires when PREMIUM flow crosses above/below this threshold. Use 0 for simple zero-line crosses.",
+)
+
+show_ai_panel = st.sidebar.checkbox(
+    "Show SG2 Flow Matrix",
+    value=True,
+)
+
+divergence_threshold = st.sidebar.number_input(
+    "Divergence Threshold",
+    min_value=0,
+    value=20_000_000,
+    step=5_000_000,
+    help="Minimum flow change used to flag price/flow divergence.",
+)
+
+spike_threshold = st.sidebar.number_input(
+    "Spike/Dump Threshold",
+    min_value=0,
+    value=75_000_000,
+    step=25_000_000,
+    help="Minimum one-bucket premium-flow change used to flag spike/dump signals.",
 )
 
 chain_width = st.sidebar.slider(
@@ -1048,6 +1136,208 @@ def flow_comparison_chart(history_df, symbol, flow_data):
     return fig
 
 
+
+# ============================================================
+# SG2 FLOW MATRIX + SIGNAL LOG
+# ============================================================
+
+def _status_icon(status):
+    if status == "bull":
+        return "🟢"
+    if status == "bear":
+        return "🔴"
+    if status == "warn":
+        return "🟡"
+    return "⚪"
+
+
+def _status_text(status):
+    if status == "bull":
+        return "BULLISH"
+    if status == "bear":
+        return "BEARISH"
+    if status == "warn":
+        return "WATCH"
+    return "NEUTRAL"
+
+
+def analyze_flow_signals(history_df, symbol, flow_data):
+    df = build_chart_df(history_df)
+
+    empty_result = {
+        "symbol": symbol,
+        "flow_cross": "neutral",
+        "flow_divergence": "neutral",
+        "key_level": "neutral",
+        "spike_dump": "neutral",
+        "messages": [],
+    }
+
+    if df is None or df.empty or len(df) < 3:
+        empty_result["messages"].append(
+            f"{symbol}: Waiting for more flow history to build signals."
+        )
+        return empty_result
+
+    df = df.copy()
+    df["time"] = pd.to_datetime(df["time"])
+
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    messages = []
+
+    zero_now = float(latest.get("zero_dte_flow", 0))
+    zero_prev = float(prev.get("zero_dte_flow", 0))
+    all_now = float(latest.get("all_exp_flow", 0))
+    all_prev = float(prev.get("all_exp_flow", 0))
+
+    price_now = float(latest.get("spot", 0))
+    price_prev = float(prev.get("spot", 0))
+
+    zero_change = zero_now - zero_prev
+    all_change = all_now - all_prev
+    price_change = price_now - price_prev
+
+    flow_cross = "neutral"
+
+    if zero_now > all_now and zero_prev <= all_prev:
+        flow_cross = "bull"
+        messages.append(f"{symbol}: Bullish flow cross — 0DTE premium flow crossed above all-exp flow.")
+    elif zero_now < all_now and zero_prev >= all_prev:
+        flow_cross = "bear"
+        messages.append(f"{symbol}: Bearish flow cross — 0DTE premium flow crossed below all-exp flow.")
+    elif zero_now > all_now and zero_change > 0:
+        flow_cross = "bull"
+    elif zero_now < all_now and zero_change < 0:
+        flow_cross = "bear"
+
+    flow_divergence = "neutral"
+
+    if price_change < 0 and zero_change > divergence_threshold:
+        flow_divergence = "bull"
+        messages.append(f"{symbol}: Bullish divergence — price slipped while 0DTE flow improved.")
+    elif price_change > 0 and zero_change < -divergence_threshold:
+        flow_divergence = "bear"
+        messages.append(f"{symbol}: Bearish divergence — price rose while 0DTE flow weakened.")
+
+    gamma_levels = flow_data.get("gamma_levels", {})
+    key_level = "neutral"
+
+    call_level = gamma_levels.get("top_call_gamma")
+    put_level = gamma_levels.get("top_put_gamma")
+
+    try:
+        call_level = float(call_level) if call_level else None
+    except Exception:
+        call_level = None
+
+    try:
+        put_level = float(put_level) if put_level else None
+    except Exception:
+        put_level = None
+
+    if call_level and price_now > call_level and price_prev <= call_level:
+        key_level = "bull"
+        messages.append(f"{symbol}: Key level reclaim — price crossed above call gamma {call_level:.2f}.")
+    elif put_level and price_now < put_level and price_prev >= put_level:
+        key_level = "bear"
+        messages.append(f"{symbol}: Key level break — price crossed below put gamma {put_level:.2f}.")
+    elif call_level and price_now > call_level:
+        key_level = "bull"
+    elif put_level and price_now < put_level:
+        key_level = "bear"
+    elif call_level and put_level:
+        key_level = "warn"
+
+    spike_dump = "neutral"
+
+    if zero_change >= spike_threshold and all_change >= 0:
+        spike_dump = "bull"
+        messages.append(f"{symbol}: Flow spike — 0DTE premium flow jumped {money_fmt(zero_change)}.")
+    elif zero_change <= -spike_threshold and all_change <= 0:
+        spike_dump = "bear"
+        messages.append(f"{symbol}: Flow dump — 0DTE premium flow dropped {money_fmt(zero_change)}.")
+
+    zero_bias = flow_data["zero_dte"].get("delta_bias", "NEUTRAL")
+    zero_ratio = flow_data["zero_dte"].get("delta_ratio", 0)
+    all_bias = flow_data["all_exp"].get("delta_bias", "NEUTRAL")
+    all_ratio = flow_data["all_exp"].get("delta_ratio", 0)
+
+    messages.append(
+        f"{symbol}: 0DTE delta bias {zero_bias} ({zero_ratio:.0f}%) | All-exp delta bias {all_bias} ({all_ratio:.0f}%)."
+    )
+
+    return {
+        "symbol": symbol,
+        "flow_cross": flow_cross,
+        "flow_divergence": flow_divergence,
+        "key_level": key_level,
+        "spike_dump": spike_dump,
+        "messages": messages,
+    }
+
+
+def render_sg2_flow_matrix(signal_result):
+    symbol = signal_result["symbol"]
+
+    rows = [
+        ("Flow Cross", signal_result["flow_cross"]),
+        ("Flow Divergence", signal_result["flow_divergence"]),
+        ("Key Level", signal_result["key_level"]),
+        ("Spike/Dump", signal_result["spike_dump"]),
+    ]
+
+    html = f"""
+    <div class="sg2-panel">
+        <div>
+            <span class="sg2-title">SG2 FLOW</span>
+            <span class="sg2-subtitle">AI SIGNAL MATRIX</span>
+            <span style="float:right;color:#a3e635;font-weight:900;">
+                {datetime.now(CENTRAL_TZ).strftime('%b. %d %Y %I:%M %p CT')}
+            </span>
+        </div>
+        <table class="sg2-table">
+            <tr>
+                <th></th>
+                <th>{symbol}</th>
+                <th>Status</th>
+            </tr>
+    """
+
+    for label, status in rows:
+        html += f"""
+            <tr>
+                <td class="sg2-label">&gt; {label}</td>
+                <td class="sg2-cell">{_status_icon(status)}</td>
+                <td class="sg2-cell">{_status_text(status)}</td>
+            </tr>
+        """
+
+    html += """
+        </table>
+    </div>
+    """
+
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def render_signal_log(signal_result):
+    lines = signal_result.get("messages", [])
+
+    html = """
+    <div class="sg2-log">
+        <div class="sg2-log-title">SG2 Signal Log</div>
+    """
+
+    for line in lines[-8:]:
+        html += f'<div class="sg2-log-line">{line}</div>'
+
+    html += "</div>"
+
+    st.markdown(html, unsafe_allow_html=True)
+
+
 # ============================================================
 # LOAD DATA
 # ============================================================
@@ -1060,6 +1350,21 @@ except Exception as e:
     st.error(f"Failed to load expiration flow for {symbol}")
     st.exception(e)
     st.stop()
+
+
+# ============================================================
+# SG2 FLOW MATRIX DISPLAY
+# ============================================================
+
+signal_result = analyze_flow_signals(
+    history_df=history_df,
+    symbol=symbol,
+    flow_data=flow_data,
+)
+
+if show_ai_panel:
+    render_sg2_flow_matrix(signal_result)
+    render_signal_log(signal_result)
 
 
 # ============================================================
