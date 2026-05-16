@@ -1,7 +1,7 @@
 # ============================================================
 # daily_levels_discord.py
 # Auto-sends multi-symbol daily gamma levels ThinkScript
-# Symbols: SPY, SPX, XSP, QQQ, IWM, TSLA
+# Symbols: SPY, SPX, XSP, QQQ, IWM, TSLA, AAPL
 # Uses next 10 expirations by default
 # Sends daily at 6:30 AM Central
 # ============================================================
@@ -36,7 +36,7 @@ OUTPUT_FILE = "Custom_Daily_Gamma_Levels.ts"
 
 EXPIRATION_COUNT = 5
 
-SYMBOLS = ["SPY", "SPX", "XSP", "QQQ", "IWM", "TSLA"]
+SYMBOLS = ["SPY", "SPX", "XSP", "QQQ", "IWM", "TSLA", "AAPL"]
 
 WIDTH_BY_SYMBOL = {
     "SPY": 150,
@@ -45,6 +45,7 @@ WIDTH_BY_SYMBOL = {
     "QQQ": 150,
     "IWM": 75,
     "TSLA": 75,
+    "AAPL": 75
 }
 
 HEADERS = {
