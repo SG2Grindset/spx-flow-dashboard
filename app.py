@@ -65,7 +65,7 @@ symbol = st.session_state.selected_symbol
 
 
 # =========================================================
-# CSS / DARK DASHBOARD THEME
+# CSS
 # =========================================================
 st.markdown(
     """
@@ -95,6 +95,18 @@ section[data-testid="stSidebar"] * {
 [data-testid="stSidebar"] label {
     color: #ffdd00 !important;
     font-weight: 900 !important;
+}
+
+/* Sidebar white inputs need black text */
+section[data-testid="stSidebar"] input,
+section[data-testid="stSidebar"] textarea,
+section[data-testid="stSidebar"] select,
+section[data-testid="stSidebar"] div[data-baseweb="select"] span {
+    color: #000000 !important;
+}
+
+section[data-testid="stSidebar"] div[data-baseweb="select"] {
+    background-color: #ffffff !important;
 }
 
 .stButton > button {
@@ -172,12 +184,39 @@ section[data-testid="stSidebar"] * {
     color: white;
     font-size: 16px;
     font-weight: 900;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
 }
 
-[data-testid="stDataFrame"] {
-    background: #0b1118 !important;
+/* Dark matrix table */
+.sg2-matrix table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #0b1118;
+    color: white;
+    font-size: 13px;
     border-radius: 12px;
+    overflow: hidden;
+}
+
+.sg2-matrix th {
+    color: #ffdd00;
+    background: #111923;
+    padding: 8px;
+    border: 1px solid #263241;
+    text-align: center;
+    font-weight: 900;
+}
+
+.sg2-matrix td {
+    padding: 8px;
+    border: 1px solid #263241;
+    text-align: center;
+    background: #0b1118;
+}
+
+.sg2-matrix td:first-child {
+    text-align: left;
+    font-weight: 900;
 }
 
 hr {
@@ -414,7 +453,39 @@ gamma_regime = safe_get(snapshot, "gamma_regime", "NEUTRAL")
 odte_rows = safe_get(snapshot, "odte_rows", 0)
 all_exp_rows = safe_get(snapshot, "all_exp_rows", 0)
 
-chart_df = safe_get(snapshot, "chart_df", pd.DataFrame())
+
+# =========================================================
+# FLOW HISTORY FOR TIME-BASED CHART
+# =========================================================
+if "flow_history" not in st.session_state:
+    st.session_state.flow_history = {}
+
+if symbol not in st.session_state.flow_history:
+    st.session_state.flow_history[symbol] = pd.DataFrame(
+        columns=["time", "odte_flow", "all_exp_flow", "price"]
+    )
+
+new_row = pd.DataFrame(
+    [{
+        "time": pd.Timestamp.now(),
+        "odte_flow": odte_premium_net,
+        "all_exp_flow": all_exp_premium_net,
+        "price": spot,
+    }]
+)
+
+st.session_state.flow_history[symbol] = pd.concat(
+    [st.session_state.flow_history[symbol], new_row],
+    ignore_index=True,
+)
+
+cutoff = pd.Timestamp.now() - pd.Timedelta(hours=lookback_hours)
+
+history_df = st.session_state.flow_history[symbol].copy()
+history_df["time"] = pd.to_datetime(history_df["time"])
+history_df = history_df[history_df["time"] >= cutoff]
+
+st.session_state.flow_history[symbol] = history_df
 
 
 # =========================================================
@@ -471,153 +542,95 @@ st.markdown(
 # =========================================================
 # CHART + MATRIX
 # =========================================================
-left_chart, right_matrix = st.columns([3.4, 0.9])
+left_chart, right_matrix = st.columns([3.5, 0.85])
 
 with left_chart:
     fig = go.Figure()
 
-    if isinstance(chart_df, pd.DataFrame) and not chart_df.empty:
-        x_col = "time" if "time" in chart_df.columns else chart_df.columns[0]
+    if not history_df.empty:
+        history_df = history_df.copy()
+        history_df["time"] = pd.to_datetime(history_df["time"])
+        history_df["odte_flow"] = pd.to_numeric(history_df["odte_flow"], errors="coerce").fillna(0)
+        history_df["all_exp_flow"] = pd.to_numeric(history_df["all_exp_flow"], errors="coerce").fillna(0)
+        history_df["price"] = pd.to_numeric(history_df["price"], errors="coerce").fillna(0)
 
-        flow_col = None
-        for possible in ["premium_flow", "flow", "net_flow"]:
-            if possible in chart_df.columns:
-                flow_col = possible
-                break
-
-        price_col = None
-        for possible in ["price", "spot"]:
-            if possible in chart_df.columns:
-                price_col = possible
-                break
-
-        if flow_col:
-            flow_series = pd.to_numeric(chart_df[flow_col], errors="coerce").fillna(0)
-            x_vals = chart_df[x_col]
-
-            bullish_flow = flow_series.where(flow_series > 0, 0)
-            bearish_flow = flow_series.where(flow_series < 0, 0)
-
-            cumulative_flow = flow_series.cumsum()
-            flow_ma_fast = cumulative_flow.rolling(5, min_periods=1).mean()
-            flow_ma_slow = cumulative_flow.rolling(13, min_periods=1).mean()
-
-            fig.add_trace(
-                go.Bar(
-                    x=x_vals,
-                    y=bullish_flow,
-                    name="Bullish Flow",
-                    marker_color="#26ff38",
-                    opacity=0.85,
-                )
+        fig.add_trace(
+            go.Scatter(
+                x=history_df["time"],
+                y=history_df["odte_flow"],
+                name="0DTE Flow",
+                mode="lines",
+                line=dict(color="#ffe100", width=4, shape="spline"),
             )
-
-            fig.add_trace(
-                go.Bar(
-                    x=x_vals,
-                    y=bearish_flow,
-                    name="Bearish Flow",
-                    marker_color="#ff3030",
-                    opacity=0.85,
-                )
-            )
-
-            fig.add_trace(
-                go.Scatter(
-                    x=x_vals,
-                    y=flow_ma_fast,
-                    name="Fast Flow",
-                    mode="lines",
-                    line=dict(color="#ffe100", width=4, shape="spline"),
-                )
-            )
-
-            fig.add_trace(
-                go.Scatter(
-                    x=x_vals,
-                    y=flow_ma_slow,
-                    name="Slow Flow",
-                    mode="lines",
-                    line=dict(color="#2cff1f", width=4, shape="spline"),
-                )
-            )
-
-            if show_flow_dots:
-                dot_df = chart_df[flow_series.abs() >= flow_dot_threshold].copy()
-                if not dot_df.empty:
-                    dot_values = pd.to_numeric(dot_df[flow_col], errors="coerce").fillna(0)
-
-                    fig.add_trace(
-                        go.Scatter(
-                            x=dot_df[x_col],
-                            y=dot_values,
-                            mode="markers",
-                            name="FLOW X",
-                            marker=dict(
-                                size=9,
-                                color=[
-                                    "#26ff38" if v > 0 else "#ff3030"
-                                    for v in dot_values
-                                ],
-                                line=dict(width=1, color="white"),
-                            ),
-                        )
-                    )
-
-            fig.add_hline(
-                y=flow_dot_threshold,
-                line_dash="dash",
-                line_color="#26ff38",
-                annotation_text=f"FLOW Dot Threshold",
-                annotation_position="right",
-            )
-
-            fig.add_hline(
-                y=-flow_dot_threshold,
-                line_dash="dash",
-                line_color="#ff3030",
-                annotation_text=f"-{flow_dot_threshold:,}",
-                annotation_position="right",
-            )
-
-        if price_col:
-            fig.add_trace(
-                go.Scatter(
-                    x=chart_df[x_col],
-                    y=chart_df[price_col],
-                    name="Price",
-                    mode="lines",
-                    line=dict(color="white", width=4, shape="spline"),
-                    yaxis="y2",
-                )
-            )
-
-    if call_gamma:
-        fig.add_hline(
-            y=flow_dot_threshold * 1.05,
-            line_dash="dash",
-            line_color="#26ff38",
-            annotation_text=f"Call Gamma {call_gamma:.2f}",
-            annotation_position="left",
         )
 
-    if put_gamma:
+        fig.add_trace(
+            go.Scatter(
+                x=history_df["time"],
+                y=history_df["all_exp_flow"],
+                name="All Exp Flow",
+                mode="lines",
+                line=dict(color="#2cff1f", width=4, shape="spline"),
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=history_df["time"],
+                y=history_df["price"],
+                name="Price",
+                mode="lines",
+                line=dict(color="white", width=4, shape="spline"),
+                yaxis="y2",
+            )
+        )
+
+        if show_flow_dots:
+            dot_df = history_df[
+                history_df["odte_flow"].abs() >= flow_dot_threshold
+            ].copy()
+
+            if not dot_df.empty:
+                fig.add_trace(
+                    go.Scatter(
+                        x=dot_df["time"],
+                        y=dot_df["odte_flow"],
+                        mode="markers",
+                        name="FLOW X",
+                        marker=dict(
+                            size=11,
+                            color=[
+                                "#26ff38" if v > 0 else "#ff3030"
+                                for v in dot_df["odte_flow"]
+                            ],
+                            line=dict(width=1, color="white"),
+                        ),
+                    )
+                )
+
         fig.add_hline(
-            y=-flow_dot_threshold * 0.55,
+            y=flow_dot_threshold,
+            line_dash="dash",
+            line_color="#26ff38",
+            annotation_text="FLOW Dot Threshold",
+            annotation_position="right",
+        )
+
+        fig.add_hline(
+            y=-flow_dot_threshold,
             line_dash="dash",
             line_color="#ff3030",
-            annotation_text=f"Put Gamma {put_gamma:.2f}",
-            annotation_position="left",
+            annotation_text=f"-{flow_dot_threshold:,}",
+            annotation_position="right",
         )
 
     fig.update_layout(
-        title=f"{symbol} Premium Flow ({chart_bucket} Min)",
+        title=f"{symbol} Flow Trend ({chart_bucket} Min)",
         template="plotly_dark",
         paper_bgcolor="#111923",
         plot_bgcolor="#252a2f",
         height=500,
-        margin=dict(l=40, r=55, t=50, b=45),
-        barmode="relative",
+        margin=dict(l=40, r=60, t=50, b=45),
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -642,6 +655,8 @@ with left_chart:
             tickfont=dict(color="white"),
         ),
         xaxis=dict(
+            tickformat="%-H:%M",
+            dtick=180000,
             gridcolor="rgba(255,255,255,.10)",
             tickfont=dict(color="white"),
         ),
@@ -700,12 +715,15 @@ with right_matrix:
             )
 
         matrix_df = pd.DataFrame(rows)
+        matrix_html = matrix_df.to_html(index=False, escape=False)
 
-        st.dataframe(
-            matrix_df,
-            use_container_width=True,
-            hide_index=True,
-            height=245,
+        st.markdown(
+            f"""
+            <div class="sg2-matrix">
+                {matrix_html}
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
         st.markdown("</div>", unsafe_allow_html=True)
