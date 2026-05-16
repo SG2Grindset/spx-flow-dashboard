@@ -631,44 +631,26 @@ st.markdown("</div>", unsafe_allow_html=True)
 # =========================================================
 today_txt = datetime.now().strftime("%A, %B %d, %Y")
 
-st.markdown(
-    f"""
-    <div class="header-card">
-        <div style="font-size:25px;font-weight:900;color:white;">
-            {symbol} {today_txt}
-        </div>
-
-        <div style="font-size:15px;font-weight:800;color:white;margin-top:8px;">
-
-            Spot:
-            <span class="green-text">{spot:.2f}</span>
-
-            &nbsp;&nbsp; | &nbsp;&nbsp;
-
-            0DTE Exp:
-            <span class="yellow-text">{odte_exp}</span>
-
-            &nbsp;&nbsp; | &nbsp;&nbsp;
-
-            <span class="yellow-text">0DTE Flow:</span>
-            {fmt_money(odte_premium_net)}
-
-            &nbsp;&nbsp; | &nbsp;&nbsp;
-
-            All Exp Used:
-            {all_exp_count}
-
-            &nbsp;&nbsp; | &nbsp;&nbsp;
-
-            <span class="yellow-text">All Exp Flow:</span>
-            {fmt_money(all_exp_premium_net)}
-
-        </div>
+header_html = f"""
+<div class="header-card">
+    <div style="font-size:25px;font-weight:900;color:white;">
+        {symbol} {today_txt}
     </div>
-    """,
-    unsafe_allow_html=True,
-)
+    <div style="font-size:15px;font-weight:800;color:white;margin-top:8px;">
+        Spot: <span class="green-text">{spot:.2f}</span>
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        0DTE Exp: <span class="yellow-text">{odte_exp}</span>
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="yellow-text">0DTE Flow:</span> {fmt_money(odte_premium_net)}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        All Exp Used: {all_exp_count}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="yellow-text">All Exp Flow:</span> {fmt_money(all_exp_premium_net)}
+    </div>
+</div>
+"""
 
+st.markdown(header_html, unsafe_allow_html=True)
 
 # =========================================================
 # CHART + MATRIX
