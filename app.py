@@ -13,8 +13,15 @@ from flow_engine import get_flow_snapshot
 st.set_page_config(
     page_title="SG2 FLOW Dashboard",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
+
+
+# =========================================================
+# SIDEBAR STATE
+# =========================================================
+if "sidebar_state" not in st.session_state:
+    st.session_state.sidebar_state = "collapsed"
 
 
 # =========================================================
@@ -77,9 +84,9 @@ html, body, .stApp {
 
 .main .block-container {
     background: transparent !important;
-    padding-top: 1.5rem;
-    padding-left: 1.6rem;
-    padding-right: 1.6rem;
+    padding-top: 1rem;
+    padding-left: 1.4rem;
+    padding-right: 1.4rem;
     max-width: 100%;
 }
 
@@ -97,7 +104,7 @@ section[data-testid="stSidebar"] * {
     font-weight: 900 !important;
 }
 
-/* Sidebar white inputs need black text */
+/* Sidebar input text black */
 section[data-testid="stSidebar"] input,
 section[data-testid="stSidebar"] textarea,
 section[data-testid="stSidebar"] select,
@@ -187,7 +194,6 @@ section[data-testid="stSidebar"] div[data-baseweb="select"] {
     margin-bottom: 8px;
 }
 
-/* Dark matrix table */
 .sg2-matrix table {
     width: 100%;
     border-collapse: collapse;
@@ -232,13 +238,14 @@ hr {
 # SIDEBAR
 # =========================================================
 with st.sidebar:
+    st.markdown("## ⚙️ Dashboard Controls")
+
     auto_refresh = st.checkbox("Auto Refresh", value=True)
 
     refresh_interval = st.selectbox(
         "Refresh Interval",
         options=[5, 10, 15, 30, 60],
         index=2,
-        key="refresh_interval",
     )
 
     all_exp_count = st.slider(
@@ -246,14 +253,12 @@ with st.sidebar:
         min_value=1,
         max_value=10,
         value=5,
-        key="all_exp_count",
     )
 
     chart_bucket = st.selectbox(
         "Chart Bucket",
         options=[1, 3, 5],
         index=0,
-        key="chart_bucket",
     )
 
     lookback_hours = st.slider(
@@ -261,7 +266,6 @@ with st.sidebar:
         min_value=1,
         max_value=8,
         value=2,
-        key="lookback_hours",
     )
 
     show_flow_dots = st.checkbox("Show FLOW Dots", value=True)
@@ -277,6 +281,7 @@ with st.sidebar:
         step=1_000_000,
         key=f"flow_dot_threshold_{symbol}",
     )
+
     st.caption(f"Default for {symbol}: {default_flow_dot_threshold:,}")
 
     show_matrix = st.checkbox("Show SG2 Flow Matrix", value=True)
@@ -303,14 +308,22 @@ with st.sidebar:
         max_value=300,
         value=100,
         step=25,
-        key=f"strike_width_{symbol}",
     )
 
     st.markdown("---")
-    st.caption("Primary chart model: Premium Flow = Option Price × Contracts × 100.")
-    st.caption("Secondary bias model: Signed Delta Notional = Spot × Delta × Contracts × 100.")
+
+    st.caption(
+        "Primary chart model: Premium Flow = Option Price × Contracts × 100."
+    )
+
+    st.caption(
+        "Secondary bias model: Signed Delta Notional = Spot × Delta × Contracts × 100."
+    )
 
 
+# =========================================================
+# AUTO REFRESH
+# =========================================================
 if auto_refresh:
     st_autorefresh(
         interval=refresh_interval * 1000,
@@ -331,10 +344,13 @@ def fmt_money(value):
 
     if abs_val >= 1_000_000_000:
         return f"{value / 1_000_000_000:.2f}B"
+
     if abs_val >= 1_000_000:
         return f"{value / 1_000_000:.1f}M"
+
     if abs_val >= 1_000:
         return f"{value / 1_000:.1f}K"
+
     return f"{value:.0f}"
 
 
@@ -355,14 +371,17 @@ def color_class(value):
 
     if value > 0:
         return "green-text"
+
     if value < 0:
         return "red-text"
+
     return ""
 
 
 def safe_get(snapshot, key, default=0):
     if not isinstance(snapshot, dict):
         return default
+
     return snapshot.get(key, default)
 
 
@@ -374,16 +393,20 @@ def status_from_value(value):
 
     if value > 0:
         return "BULLISH"
+
     if value < 0:
         return "BEARISH"
+
     return "NEUTRAL"
 
 
 def dot_from_status(status):
     if status == "BULLISH":
         return "🟢"
+
     if status == "BEARISH":
         return "🔴"
+
     return "🟣"
 
 
@@ -393,22 +416,30 @@ def dot_from_status(status):
 symbol_cols = st.columns(len(SYMBOLS))
 
 for i, sym in enumerate(SYMBOLS):
+
     icon = SYMBOL_ICONS.get(sym, "📊")
+
     is_active = sym == st.session_state.selected_symbol
 
     with symbol_cols[i]:
+
         if st.button(
             f"{icon}  {sym}",
             key=f"symbol_button_{sym}_{i}",
             use_container_width=True,
             type="primary" if is_active else "secondary",
         ):
+
             st.session_state.selected_symbol = sym
             st.rerun()
 
 symbol = st.session_state.selected_symbol
 icon = SYMBOL_ICONS.get(symbol, "📊")
 
+
+# =========================================================
+# ACTIVE BAR
+# =========================================================
 st.markdown(
     f"""
     <div class="active-bar">
@@ -420,7 +451,7 @@ st.markdown(
 
 
 # =========================================================
-# LOAD DATA
+# LOAD SNAPSHOT
 # =========================================================
 try:
     snapshot = get_flow_snapshot(
@@ -430,6 +461,7 @@ try:
         lookback_hours=lookback_hours,
         strike_width=strike_width,
     )
+
 except Exception as e:
     st.error(f"Could not load flow data for {symbol}: {e}")
     st.stop()
@@ -455,7 +487,7 @@ all_exp_rows = safe_get(snapshot, "all_exp_rows", 0)
 
 
 # =========================================================
-# FLOW HISTORY FOR TIME-BASED CHART
+# FLOW HISTORY
 # =========================================================
 if "flow_history" not in st.session_state:
     st.session_state.flow_history = {}
@@ -482,7 +514,9 @@ st.session_state.flow_history[symbol] = pd.concat(
 cutoff = pd.Timestamp.now() - pd.Timedelta(hours=lookback_hours)
 
 history_df = st.session_state.flow_history[symbol].copy()
+
 history_df["time"] = pd.to_datetime(history_df["time"])
+
 history_df = history_df[history_df["time"] >= cutoff]
 
 st.session_state.flow_history[symbol] = history_df
@@ -494,21 +528,100 @@ st.session_state.flow_history[symbol] = history_df
 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
 
 r1 = st.columns(5)
-r1[0].markdown(metric_html("Spot", f"{spot:.2f}" if spot else "0"), unsafe_allow_html=True)
-r1[1].markdown(metric_html("0DTE Premium Net", fmt_money(odte_premium_net), color_class(odte_premium_net)), unsafe_allow_html=True)
-r1[2].markdown(metric_html("All Exp Premium Net", fmt_money(all_exp_premium_net), color_class(all_exp_premium_net)), unsafe_allow_html=True)
-r1[3].markdown(metric_html("Call Gamma", f"{call_gamma:.2f}" if call_gamma else "0", "green-text"), unsafe_allow_html=True)
-r1[4].markdown(metric_html("Put Gamma", f"{put_gamma:.2f}" if put_gamma else "0", "green-text"), unsafe_allow_html=True)
+
+r1[0].markdown(
+    metric_html("Spot", f"{spot:.2f}"),
+    unsafe_allow_html=True,
+)
+
+r1[1].markdown(
+    metric_html(
+        "0DTE Premium Net",
+        fmt_money(odte_premium_net),
+        color_class(odte_premium_net),
+    ),
+    unsafe_allow_html=True,
+)
+
+r1[2].markdown(
+    metric_html(
+        "All Exp Premium Net",
+        fmt_money(all_exp_premium_net),
+        color_class(all_exp_premium_net),
+    ),
+    unsafe_allow_html=True,
+)
+
+r1[3].markdown(
+    metric_html(
+        "Call Gamma",
+        f"{call_gamma:.2f}",
+        "green-text",
+    ),
+    unsafe_allow_html=True,
+)
+
+r1[4].markdown(
+    metric_html(
+        "Put Gamma",
+        f"{put_gamma:.2f}",
+        "green-text",
+    ),
+    unsafe_allow_html=True,
+)
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
 r2 = st.columns(6)
-r2[0].markdown(metric_html("0DTE Signed Delta", fmt_money(odte_signed_delta), color_class(odte_signed_delta)), unsafe_allow_html=True)
-r2[1].markdown(metric_html("0DTE Delta Bias", odte_delta_bias, "red-text" if "BEAR" in str(odte_delta_bias) else "green-text" if "BULL" in str(odte_delta_bias) else ""), unsafe_allow_html=True)
-r2[2].markdown(metric_html("All Exp Delta Bias", all_exp_delta_bias, "red-text" if "BEAR" in str(all_exp_delta_bias) else "green-text" if "BULL" in str(all_exp_delta_bias) else ""), unsafe_allow_html=True)
-r2[3].markdown(metric_html("Gamma Regime", gamma_regime, "red-text" if "BELOW" in str(gamma_regime) else "green-text" if "ABOVE" in str(gamma_regime) else ""), unsafe_allow_html=True)
-r2[4].markdown(metric_html("0DTE Rows", odte_rows), unsafe_allow_html=True)
-r2[5].markdown(metric_html("All Exp Rows", all_exp_rows), unsafe_allow_html=True)
+
+r2[0].markdown(
+    metric_html(
+        "0DTE Signed Delta",
+        fmt_money(odte_signed_delta),
+        color_class(odte_signed_delta),
+    ),
+    unsafe_allow_html=True,
+)
+
+r2[1].markdown(
+    metric_html(
+        "0DTE Delta Bias",
+        odte_delta_bias,
+        "red-text" if "BEAR" in str(odte_delta_bias)
+        else "green-text",
+    ),
+    unsafe_allow_html=True,
+)
+
+r2[2].markdown(
+    metric_html(
+        "All Exp Delta Bias",
+        all_exp_delta_bias,
+        "red-text" if "BEAR" in str(all_exp_delta_bias)
+        else "green-text",
+    ),
+    unsafe_allow_html=True,
+)
+
+r2[3].markdown(
+    metric_html(
+        "Gamma Regime",
+        gamma_regime,
+        "green-text" if "ABOVE" in str(gamma_regime)
+        else "red-text",
+    ),
+    unsafe_allow_html=True,
+)
+
+r2[4].markdown(
+    metric_html("0DTE Rows", odte_rows),
+    unsafe_allow_html=True,
+)
+
+r2[5].markdown(
+    metric_html("All Exp Rows", all_exp_rows),
+    unsafe_allow_html=True,
+)
 
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -521,17 +634,35 @@ today_txt = datetime.now().strftime("%A, %B %d, %Y")
 st.markdown(
     f"""
     <div class="header-card">
-        <div style="font-size:25px;font-weight:900;color:white;">{symbol} {today_txt}</div>
+        <div style="font-size:25px;font-weight:900;color:white;">
+            {symbol} {today_txt}
+        </div>
+
         <div style="font-size:15px;font-weight:800;color:white;margin-top:8px;">
-            Spot: <span class="green-text">{spot:.2f}</span>
+
+            Spot:
+            <span class="green-text">{spot:.2f}</span>
+
             &nbsp;&nbsp; | &nbsp;&nbsp;
-            0DTE Exp: <span class="yellow-text">{odte_exp}</span>
+
+            0DTE Exp:
+            <span class="yellow-text">{odte_exp}</span>
+
             &nbsp;&nbsp; | &nbsp;&nbsp;
-            <span class="yellow-text">0DTE Flow:</span> {fmt_money(odte_premium_net)}
+
+            <span class="yellow-text">0DTE Flow:</span>
+            {fmt_money(odte_premium_net)}
+
             &nbsp;&nbsp; | &nbsp;&nbsp;
-            All Exp Used: {all_exp_count}
+
+            All Exp Used:
+            {all_exp_count}
+
             &nbsp;&nbsp; | &nbsp;&nbsp;
-            <span class="yellow-text">All Exp Flow:</span> {fmt_money(all_exp_premium_net)}
+
+            <span class="yellow-text">All Exp Flow:</span>
+            {fmt_money(all_exp_premium_net)}
+
         </div>
     </div>
     """,
@@ -544,53 +675,87 @@ st.markdown(
 # =========================================================
 left_chart, right_matrix = st.columns([3.5, 0.85])
 
+
+# =========================================================
+# FLOW CHART
+# =========================================================
 with left_chart:
+
     fig = go.Figure()
 
     if not history_df.empty:
-        history_df = history_df.copy()
-        history_df["time"] = pd.to_datetime(history_df["time"])
-        history_df["odte_flow"] = pd.to_numeric(history_df["odte_flow"], errors="coerce").fillna(0)
-        history_df["all_exp_flow"] = pd.to_numeric(history_df["all_exp_flow"], errors="coerce").fillna(0)
-        history_df["price"] = pd.to_numeric(history_df["price"], errors="coerce").fillna(0)
 
+        history_df["odte_flow"] = pd.to_numeric(
+            history_df["odte_flow"],
+            errors="coerce",
+        ).fillna(0)
+
+        history_df["all_exp_flow"] = pd.to_numeric(
+            history_df["all_exp_flow"],
+            errors="coerce",
+        ).fillna(0)
+
+        history_df["price"] = pd.to_numeric(
+            history_df["price"],
+            errors="coerce",
+        ).fillna(0)
+
+        # 0DTE FLOW
         fig.add_trace(
             go.Scatter(
                 x=history_df["time"],
                 y=history_df["odte_flow"],
                 name="0DTE Flow",
                 mode="lines",
-                line=dict(color="#ffe100", width=4, shape="spline"),
+                line=dict(
+                    color="#ffe100",
+                    width=4,
+                    shape="spline",
+                ),
             )
         )
 
+        # ALL EXP FLOW
         fig.add_trace(
             go.Scatter(
                 x=history_df["time"],
                 y=history_df["all_exp_flow"],
                 name="All Exp Flow",
                 mode="lines",
-                line=dict(color="#2cff1f", width=4, shape="spline"),
+                line=dict(
+                    color="#2cff1f",
+                    width=4,
+                    shape="spline",
+                ),
             )
         )
 
+        # PRICE
         fig.add_trace(
             go.Scatter(
                 x=history_df["time"],
                 y=history_df["price"],
                 name="Price",
                 mode="lines",
-                line=dict(color="white", width=4, shape="spline"),
+                line=dict(
+                    color="white",
+                    width=4,
+                    shape="spline",
+                ),
                 yaxis="y2",
             )
         )
 
+        # FLOW DOTS
         if show_flow_dots:
+
             dot_df = history_df[
-                history_df["odte_flow"].abs() >= flow_dot_threshold
+                history_df["odte_flow"].abs()
+                >= flow_dot_threshold
             ].copy()
 
             if not dot_df.empty:
+
                 fig.add_trace(
                     go.Scatter(
                         x=dot_df["time"],
@@ -603,11 +768,15 @@ with left_chart:
                                 "#26ff38" if v > 0 else "#ff3030"
                                 for v in dot_df["odte_flow"]
                             ],
-                            line=dict(width=1, color="white"),
+                            line=dict(
+                                width=1,
+                                color="white",
+                            ),
                         ),
                     )
                 )
 
+        # FLOW THRESHOLDS
         fig.add_hline(
             y=flow_dot_threshold,
             line_dash="dash",
@@ -624,20 +793,29 @@ with left_chart:
             annotation_position="right",
         )
 
+    # CHART STYLE
     fig.update_layout(
         title=f"{symbol} Flow Trend ({chart_bucket} Min)",
         template="plotly_dark",
         paper_bgcolor="#111923",
         plot_bgcolor="#252a2f",
-        height=500,
-        margin=dict(l=40, r=60, t=50, b=45),
+        height=520,
+        margin=dict(
+            l=40,
+            r=60,
+            t=50,
+            b=45,
+        ),
         legend=dict(
             orientation="h",
             yanchor="bottom",
             y=-0.18,
             xanchor="center",
             x=0.5,
-            font=dict(size=12, color="white"),
+            font=dict(
+                size=12,
+                color="white",
+            ),
         ),
         yaxis=dict(
             title="Premium Flow",
@@ -655,53 +833,99 @@ with left_chart:
             tickfont=dict(color="white"),
         ),
         xaxis=dict(
-            tickformat="%-H:%M",
+            tickformat="%H:%M",
             dtick=180000,
             gridcolor="rgba(255,255,255,.10)",
             tickfont=dict(color="white"),
         ),
     )
 
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displayModeBar": False},
+    )
 
 
+# =========================================================
+# MATRIX
+# =========================================================
 with right_matrix:
+
     if show_matrix:
-        st.markdown('<div class="matrix-card">', unsafe_allow_html=True)
-        st.markdown('<div class="matrix-title">🧠 SG2 FLOW AI SIGNAL MATRIX</div>', unsafe_allow_html=True)
+
+        st.markdown(
+            '<div class="matrix-card">',
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            '<div class="matrix-title">🧠 SG2 FLOW AI SIGNAL MATRIX</div>',
+            unsafe_allow_html=True,
+        )
 
         rows = []
 
         for sym in SYMBOLS:
+
             try:
-                sym_snapshot = snapshot if sym == symbol else get_flow_snapshot(
-                    symbol=sym,
-                    all_exp_count=all_exp_count,
-                    chart_bucket=chart_bucket,
-                    lookback_hours=lookback_hours,
-                    strike_width=strike_width,
+                sym_snapshot = (
+                    snapshot
+                    if sym == symbol
+                    else get_flow_snapshot(
+                        symbol=sym,
+                        all_exp_count=all_exp_count,
+                        chart_bucket=chart_bucket,
+                        lookback_hours=lookback_hours,
+                        strike_width=strike_width,
+                    )
                 )
+
             except Exception:
                 sym_snapshot = {}
 
-            flow_net = safe_get(sym_snapshot, "odte_premium_net", 0)
-            div_value = safe_get(sym_snapshot, "divergence_value", 0)
-            gamma_value = safe_get(sym_snapshot, "gamma_signal", 0)
-            pulse_value = safe_get(sym_snapshot, "pulse_drop_signal", 0)
+            flow_net = safe_get(
+                sym_snapshot,
+                "odte_premium_net",
+                0,
+            )
+
+            div_value = safe_get(
+                sym_snapshot,
+                "divergence_value",
+                0,
+            )
+
+            gamma_value = safe_get(
+                sym_snapshot,
+                "gamma_signal",
+                0,
+            )
+
+            pulse_value = safe_get(
+                sym_snapshot,
+                "pulse_drop_signal",
+                0,
+            )
 
             flow_status = status_from_value(
-                1 if flow_net >= FLOW_DOT_THRESHOLDS.get(sym, 25_000_000)
-                else -1 if flow_net <= -FLOW_DOT_THRESHOLDS.get(sym, 25_000_000)
+                1
+                if flow_net >= FLOW_DOT_THRESHOLDS.get(sym, 25_000_000)
+                else -1
+                if flow_net <= -FLOW_DOT_THRESHOLDS.get(sym, 25_000_000)
                 else 0
             )
 
             divergence_status = status_from_value(
-                1 if div_value >= DIVERGENCE_THRESHOLDS.get(sym, 10_000_000)
-                else -1 if div_value <= -DIVERGENCE_THRESHOLDS.get(sym, 10_000_000)
+                1
+                if div_value >= DIVERGENCE_THRESHOLDS.get(sym, 10_000_000)
+                else -1
+                if div_value <= -DIVERGENCE_THRESHOLDS.get(sym, 10_000_000)
                 else 0
             )
 
             gamma_status = status_from_value(gamma_value)
+
             pulse_status = status_from_value(pulse_value)
 
             rows.append(
@@ -715,7 +939,11 @@ with right_matrix:
             )
 
         matrix_df = pd.DataFrame(rows)
-        matrix_html = matrix_df.to_html(index=False, escape=False)
+
+        matrix_html = matrix_df.to_html(
+            index=False,
+            escape=False,
+        )
 
         st.markdown(
             f"""
@@ -732,4 +960,8 @@ with right_matrix:
 # =========================================================
 # FOOTER
 # =========================================================
-st.caption("All values are real-time estimates. Not financial advice. Data may be delayed.")
+st.caption(
+    "All values are real-time estimates. "
+    "Not financial advice. "
+    "Data may be delayed."
+)
