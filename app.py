@@ -327,19 +327,20 @@ section[data-testid="stSidebar"] .stSlider span {
 
 .metric-label {
     color: #ffdd00;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 900;
 }
 
 .metric-value {
     color: #ffffff;
-    font-size: 21px;
+    font-size: 19px;
     font-weight: 900;
 }
 
 .green-text { color: #31e75f !important; }
 .red-text { color: #ff4b4b !important; }
 .yellow-text { color: #ffdd00 !important; }
+.cyan-text { color: #00e5ff !important; }
 
 .matrix-title {
     color: white;
@@ -424,6 +425,7 @@ with st.sidebar:
     )
 
     show_flow_dots = st.checkbox("Show FLOW Dots", value=True)
+    show_signed_delta_line = st.checkbox("Show Signed Delta Line", value=True)
 
     default_flow_dot_threshold = FLOW_DOT_THRESHOLDS.get(symbol, 25_000_000)
     default_divergence_threshold = DIVERGENCE_THRESHOLDS.get(symbol, 10_000_000)
@@ -467,7 +469,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.caption("Primary chart model: Premium Flow = Option Price × Contracts × 100.")
-    st.caption("Secondary bias model: Signed Delta Notional = Spot × Delta × Contracts × 100.")
+    st.caption("Cyan line: Signed Delta Notional = Spot × Delta × Contracts × 100.")
 
 
 if auto_refresh:
@@ -493,6 +495,20 @@ def fmt_money(value):
     if abs_val >= 1_000_000:
         return f"{value / 1_000_000:.1f}M"
     if abs_val >= 1_000:
+        return f"{value / 1_000:.1f}K"
+
+    return f"{value:.0f}"
+
+
+def fmt_num(value):
+    try:
+        value = float(value)
+    except Exception:
+        return "0"
+
+    if abs(value) >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if abs(value) >= 1_000:
         return f"{value / 1_000:.1f}K"
 
     return f"{value:.0f}"
@@ -545,6 +561,36 @@ def dot_from_status(status):
     if status == "BEARISH":
         return "🔴"
     return "🟣"
+
+
+def compute_volume_stats(snapshot, odte_exp):
+    chain_df = safe_get(snapshot, "chain_df", pd.DataFrame())
+
+    if not isinstance(chain_df, pd.DataFrame) or chain_df.empty:
+        return 0, 0, 0, 0
+
+    df = chain_df.copy()
+
+    if "expiration" in df.columns:
+        odte_df = df[df["expiration"].astype(str) == str(odte_exp)].copy()
+        if odte_df.empty:
+            odte_df = df.copy()
+    else:
+        odte_df = df.copy()
+
+    if "volume" not in odte_df.columns or "type" not in odte_df.columns:
+        return 0, 0, 0, 0
+
+    calls = odte_df[odte_df["type"] == "call"]
+    puts = odte_df[odte_df["type"] == "put"]
+
+    call_volume = calls["volume"].sum()
+    put_volume = puts["volume"].sum()
+    total_volume = call_volume + put_volume
+
+    pc_ratio = put_volume / call_volume if call_volume > 0 else 0
+
+    return call_volume, put_volume, total_volume, pc_ratio
 
 
 # =========================================================
@@ -617,6 +663,8 @@ gamma_regime = safe_get(snapshot, "gamma_regime", "NEUTRAL")
 odte_rows = safe_get(snapshot, "odte_rows", 0)
 all_exp_rows = safe_get(snapshot, "all_exp_rows", 0)
 
+call_volume, put_volume, total_volume, pc_ratio = compute_volume_stats(snapshot, odte_exp)
+
 
 # =========================================================
 # FLOW HISTORY
@@ -626,7 +674,13 @@ if "flow_history" not in st.session_state:
 
 if symbol not in st.session_state.flow_history:
     st.session_state.flow_history[symbol] = pd.DataFrame(
-        columns=["time", "odte_flow", "all_exp_flow", "price"]
+        columns=[
+            "time",
+            "odte_flow",
+            "all_exp_flow",
+            "signed_delta",
+            "price",
+        ]
     )
 
 new_row = pd.DataFrame(
@@ -634,6 +688,7 @@ new_row = pd.DataFrame(
         "time": pd.Timestamp.now(),
         "odte_flow": odte_premium_net,
         "all_exp_flow": all_exp_premium_net,
+        "signed_delta": odte_signed_delta,
         "price": spot,
     }]
 )
@@ -691,7 +746,7 @@ r1[4].markdown(
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
-r2 = st.columns(6)
+r2 = st.columns(10)
 
 r2[0].markdown(
     metric_html(
@@ -732,6 +787,26 @@ r2[3].markdown(
 r2[4].markdown(metric_html("0DTE Rows", odte_rows), unsafe_allow_html=True)
 r2[5].markdown(metric_html("All Exp Rows", all_exp_rows), unsafe_allow_html=True)
 
+r2[6].markdown(
+    metric_html("Call Vol", fmt_num(call_volume), "green-text"),
+    unsafe_allow_html=True,
+)
+
+r2[7].markdown(
+    metric_html("Put Vol", fmt_num(put_volume), "red-text"),
+    unsafe_allow_html=True,
+)
+
+r2[8].markdown(
+    metric_html("Total Vol", fmt_num(total_volume)),
+    unsafe_allow_html=True,
+)
+
+r2[9].markdown(
+    metric_html("P/C Ratio", f"{pc_ratio:.2f}", "yellow-text"),
+    unsafe_allow_html=True,
+)
+
 st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -751,6 +826,8 @@ header_html = f"""
         0DTE Exp: <span class="yellow-text">{odte_exp}</span>
         &nbsp;&nbsp; | &nbsp;&nbsp;
         <span class="yellow-text">0DTE Flow:</span> {fmt_money(odte_premium_net)}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="cyan-text">Signed Delta:</span> {fmt_money(odte_signed_delta)}
         &nbsp;&nbsp; | &nbsp;&nbsp;
         All Exp Used: {all_exp_count}
         &nbsp;&nbsp; | &nbsp;&nbsp;
@@ -785,6 +862,11 @@ with left_chart:
             errors="coerce",
         ).fillna(0)
 
+        history_df["signed_delta"] = pd.to_numeric(
+            history_df["signed_delta"],
+            errors="coerce",
+        ).fillna(0)
+
         history_df["price"] = pd.to_numeric(
             history_df["price"],
             errors="coerce",
@@ -809,6 +891,23 @@ with left_chart:
                 line=dict(color="#2cff1f", width=4, shape="spline"),
             )
         )
+
+        if show_signed_delta_line:
+            fig.add_trace(
+                go.Scatter(
+                    x=history_df["time"],
+                    y=history_df["signed_delta"],
+                    name="Signed Delta",
+                    mode="lines",
+                    line=dict(
+                        color="#00e5ff",
+                        width=1.6,
+                        dash="dot",
+                        shape="spline",
+                    ),
+                    opacity=0.9,
+                )
+            )
 
         fig.add_trace(
             go.Scatter(
@@ -876,7 +975,7 @@ with left_chart:
             font=dict(size=12, color="white"),
         ),
         yaxis=dict(
-            title="Premium Flow",
+            title="Premium Flow / Signed Delta",
             gridcolor="rgba(255,255,255,.14)",
             zeroline=True,
             zerolinecolor="white",
