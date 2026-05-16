@@ -97,15 +97,42 @@ section[data-testid="stSidebar"] * {
     font-weight: 900 !important;
 }
 
+/* =========================================
+SIDEBAR INPUT TEXT FIX
+========================================= */
 section[data-testid="stSidebar"] input,
 section[data-testid="stSidebar"] textarea,
 section[data-testid="stSidebar"] select,
-section[data-testid="stSidebar"] div[data-baseweb="select"] span {
+section[data-testid="stSidebar"] option,
+section[data-testid="stSidebar"] div[data-baseweb="select"] span,
+section[data-testid="stSidebar"] div[data-baseweb="input"] input {
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    opacity: 1 !important;
+    font-weight: 700 !important;
+}
+
+/* Dropdown backgrounds */
+section[data-testid="stSidebar"] div[data-baseweb="select"] {
+    background-color: #ffffff !important;
+    border-radius: 8px !important;
+}
+
+/* Number input backgrounds */
+section[data-testid="stSidebar"] div[data-baseweb="input"] {
+    background-color: #ffffff !important;
+    border-radius: 8px !important;
+}
+
+/* Actual input fields */
+section[data-testid="stSidebar"] input {
+    background-color: #ffffff !important;
     color: #000000 !important;
 }
 
-section[data-testid="stSidebar"] div[data-baseweb="select"] {
-    background-color: #ffffff !important;
+/* Slider values */
+section[data-testid="stSidebar"] .stSlider div {
+    color: #ffffff !important;
 }
 
 .stButton > button {
@@ -181,9 +208,10 @@ section[data-testid="stSidebar"] div[data-baseweb="select"] {
 
 .matrix-title {
     color: white;
-    font-size: 16px;
+    font-size: 20px;
     font-weight: 900;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
+    letter-spacing: .5px;
 }
 
 .sg2-matrix table {
@@ -605,7 +633,7 @@ st.markdown(header_html, unsafe_allow_html=True)
 # =========================================================
 # CHART + MATRIX
 # =========================================================
-left_chart, right_matrix = st.columns([3.5, 0.85])
+left_chart, right_matrix = st.columns([4.2, 0.8])
 
 
 # =========================================================
@@ -751,8 +779,9 @@ with left_chart:
 with right_matrix:
     if show_matrix:
         st.markdown('<div class="matrix-card">', unsafe_allow_html=True)
+
         st.markdown(
-            '<div class="matrix-title">🧠 SG2 FLOW AI SIGNAL MATRIX</div>',
+            '<div class="matrix-title">🧠 SG2 FLOW DASHBOARD</div>',
             unsafe_allow_html=True,
         )
 
