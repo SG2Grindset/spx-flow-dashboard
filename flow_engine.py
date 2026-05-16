@@ -1,8 +1,9 @@
 # ============================================================
 # flow_engine.py
-# SPY / SPX Options Data Engine - Tradier
-# Pulls Today + Next 2 Expirations
+# SPX / SPY / QQQ / TSLA / AAPL Options Data Engine - Tradier
+# Pulls Today + Next Expirations
 # Greeks Enabled + Flattened Greeks
+# Includes get_flow_snapshot() for Streamlit app.py
 # ============================================================
 
 import os
@@ -17,19 +18,45 @@ TRADIER_BASE_URL = os.getenv("TRADIER_BASE_URL", "https://api.tradier.com/v1")
 
 HEADERS = {
     "Authorization": f"Bearer {TRADIER_API_KEY}",
-    "Accept": "application/json"
+    "Accept": "application/json",
 }
 
 
 # ============================================================
-# SYMBOL MAPPING
+# SYMBOL CONFIG
 # ============================================================
+
+SUPPORTED_SYMBOLS = ["SPX", "SPY", "QQQ", "TSLA", "AAPL"]
+
+GAMMA_LEVELS = {
+    "SPX": {
+        "call_gamma": 5850,
+        "put_gamma": 5800,
+    },
+    "SPY": {
+        "call_gamma": 585,
+        "put_gamma": 580,
+    },
+    "QQQ": {
+        "call_gamma": 510,
+        "put_gamma": 500,
+    },
+    "TSLA": {
+        "call_gamma": 450,
+        "put_gamma": 430,
+    },
+    "AAPL": {
+        "call_gamma": 215,
+        "put_gamma": 210,
+    },
+}
+
 
 def get_option_root(symbol):
     """
-    For SPY, options root is SPY.
     For SPX, Tradier often uses SPX for expirations/chains.
-    If SPX returns empty chains, change this return to SPXW.
+    If SPX chains return empty, try changing this to SPXW.
+    For SPY, QQQ, TSLA, AAPL, the root is the same as the symbol.
     """
     symbol = symbol.upper().strip()
 
@@ -53,7 +80,7 @@ def _tradier_get(endpoint, params=None):
         url,
         headers=HEADERS,
         params=params,
-        timeout=20
+        timeout=20,
     )
 
     if response.status_code != 200:
@@ -73,7 +100,7 @@ def get_price(symbol="SPY"):
 
     data = _tradier_get(
         "markets/quotes",
-        params={"symbols": symbol}
+        params={"symbols": symbol},
     )
 
     quote = data.get("quotes", {}).get("quote", {})
@@ -107,8 +134,8 @@ def get_expirations(symbol="SPY"):
         params={
             "symbol": option_root,
             "includeAllRoots": "true",
-            "strikes": "false"
-        }
+            "strikes": "false",
+        },
     )
 
     expirations_block = data.get("expirations")
@@ -141,6 +168,9 @@ def get_next_expiration(symbol="SPY"):
 # ============================================================
 
 def flatten_greeks(df):
+    if df is None or df.empty:
+        return pd.DataFrame()
+
     if "greeks" not in df.columns:
         return df
 
@@ -194,8 +224,8 @@ def get_option_chain(symbol="SPY", expiration=None):
         params={
             "symbol": option_root,
             "expiration": expiration,
-            "greeks": "true"
-        }
+            "greeks": "true",
+        },
     )
 
     options_block = data.get("options")
@@ -267,7 +297,7 @@ def get_option_chain(symbol="SPY", expiration=None):
             "calls": "call",
             "puts": "put",
             "c": "call",
-            "p": "put"
+            "p": "put",
         })
     )
 
@@ -283,7 +313,7 @@ def get_option_chain(symbol="SPY", expiration=None):
     if "open_interest" not in df.columns:
         df["open_interest"] = 0
 
-    for col in [
+    numeric_cols = [
         "strike",
         "last",
         "volume",
@@ -296,12 +326,11 @@ def get_option_chain(symbol="SPY", expiration=None):
         "vega",
         "rho",
         "iv",
-    ]:
+    ]
+
+    for col in numeric_cols:
         if col in df.columns:
-            df[col] = pd.to_numeric(
-                df[col],
-                errors="coerce"
-            ).fillna(0)
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     df = df.dropna(subset=["strike"])
     df = df[df["type"].isin(["call", "put"])]
@@ -379,7 +408,7 @@ def summarize_flow(df):
             "put_premium": 0,
             "net_premium": 0,
             "call_volume": 0,
-            "put_volume": 0
+            "put_volume": 0,
         }
 
     calls = df[df["type"] == "call"]
@@ -395,26 +424,41 @@ def summarize_flow(df):
         "put_premium": put_premium,
         "net_premium": call_premium - put_premium,
         "call_volume": call_volume,
-        "put_volume": put_volume
+        "put_volume": put_volume,
     }
+
+
+def bias_from_value(value):
+    try:
+        value = float(value)
+    except Exception:
+        value = 0
+
+    if value > 0:
+        return "BULLISH"
+    if value < 0:
+        return "BEARISH"
+    return "NEUTRAL"
 
 
 # ============================================================
 # MAIN DATA FUNCTION
 # ============================================================
 
-def get_spx_flow_data(symbol="SPY", width=10):
+def get_spx_flow_data(symbol="SPY", width=10, all_exp_count=3):
     """
     Name kept so existing dashboard imports do not break.
 
     Supports:
-    - SPY
     - SPX
+    - SPY
+    - QQQ
+    - TSLA
+    - AAPL
 
     Pulls:
     - Today expiration
-    - Next expiration
-    - Third expiration
+    - Next expirations based on all_exp_count
     """
 
     symbol = symbol.upper().strip()
@@ -422,7 +466,7 @@ def get_spx_flow_data(symbol="SPY", width=10):
 
     spot_price = get_price(symbol)
 
-    expirations = get_expirations(symbol)[:3]
+    expirations = get_expirations(symbol)[:all_exp_count]
 
     chains = []
 
@@ -440,15 +484,12 @@ def get_spx_flow_data(symbol="SPY", width=10):
             f"Spot={spot_price}, Expirations={expirations}"
         )
 
-    chain_df = pd.concat(
-        chains,
-        ignore_index=True
-    )
+    chain_df = pd.concat(chains, ignore_index=True)
 
     chain_df = filter_near_money(
         chain_df,
         spot_price,
-        width=width
+        width=width,
     )
 
     if chain_df is None or chain_df.empty:
@@ -467,7 +508,167 @@ def get_spx_flow_data(symbol="SPY", width=10):
         "expiration": expirations[0],
         "expirations": expirations,
         "chain_df": chain_df,
-        "flow_summary": flow_summary
+        "flow_summary": flow_summary,
+    }
+
+
+# ============================================================
+# DASHBOARD SNAPSHOT WRAPPER
+# ============================================================
+
+def get_flow_snapshot(
+    symbol="SPY",
+    all_exp_count=5,
+    chart_bucket=1,
+    lookback_hours=2,
+    strike_width=100,
+):
+    """
+    Wrapper used by app.py.
+
+    Converts get_spx_flow_data() output into the newer dashboard format.
+    """
+
+    symbol = symbol.upper().strip()
+
+    data = get_spx_flow_data(
+        symbol=symbol,
+        width=strike_width,
+        all_exp_count=all_exp_count,
+    )
+
+    chain_df = data.get("chain_df", pd.DataFrame())
+    flow_summary = data.get("flow_summary", {})
+
+    spot = data.get("spot_price", 0)
+    expiration = data.get("expiration", "")
+    expirations = data.get("expirations", [])
+
+    call_gamma_level = GAMMA_LEVELS.get(symbol, {}).get("call_gamma", 0)
+    put_gamma_level = GAMMA_LEVELS.get(symbol, {}).get("put_gamma", 0)
+
+    if chain_df is None or chain_df.empty:
+        return {
+            "symbol": symbol,
+            "spot": spot,
+            "expiration": expiration,
+            "odte_exp": expiration,
+            "expirations": expirations,
+            "odte_premium_net": 0,
+            "all_exp_premium_net": 0,
+            "odte_signed_delta": 0,
+            "odte_delta_bias": "NEUTRAL",
+            "all_exp_delta_bias": "NEUTRAL",
+            "call_gamma": call_gamma_level,
+            "put_gamma": put_gamma_level,
+            "gamma_regime": "NEUTRAL",
+            "gamma_signal": 0,
+            "divergence_value": 0,
+            "pulse_drop_signal": 0,
+            "odte_rows": 0,
+            "all_exp_rows": 0,
+            "chain_df": pd.DataFrame(),
+            "chart_df": pd.DataFrame(),
+        }
+
+    odte_exp = str(expiration)
+
+    odte_df = chain_df[
+        chain_df["expiration"].astype(str) == odte_exp
+    ].copy()
+
+    if odte_df.empty:
+        odte_df = chain_df.copy()
+
+    calls = odte_df[odte_df["type"] == "call"]
+    puts = odte_df[odte_df["type"] == "put"]
+
+    call_premium = calls["premium"].sum() if "premium" in calls.columns else 0
+    put_premium = puts["premium"].sum() if "premium" in puts.columns else 0
+
+    odte_premium_net = call_premium - put_premium
+    all_exp_premium_net = flow_summary.get("net_premium", 0)
+
+    if "delta" in odte_df.columns:
+        odte_df["signed_delta_notional"] = (
+            float(spot)
+            * odte_df["delta"]
+            * odte_df["volume"]
+            * 100
+        )
+        odte_signed_delta = odte_df["signed_delta_notional"].sum()
+    else:
+        odte_signed_delta = 0
+
+    if call_gamma_level and spot >= call_gamma_level:
+        gamma_regime = "ABOVE CALL GAMMA"
+        gamma_signal = 1
+    elif put_gamma_level and spot <= put_gamma_level:
+        gamma_regime = "BELOW PUT GAMMA"
+        gamma_signal = -1
+    else:
+        gamma_regime = "BETWEEN GAMMA LEVELS"
+        gamma_signal = 0
+
+    chart_df = odte_df.copy()
+
+    if not chart_df.empty:
+        chart_df["price"] = spot
+
+        if "premium" in chart_df.columns:
+            chart_df["premium_flow"] = chart_df.apply(
+                lambda row: row["premium"] if row["type"] == "call" else -row["premium"],
+                axis=1,
+            )
+        else:
+            chart_df["premium_flow"] = 0
+
+        chart_df = (
+            chart_df
+            .groupby("strike", as_index=False)
+            .agg({
+                "premium_flow": "sum",
+                "price": "last",
+            })
+        )
+
+        chart_df["time"] = chart_df["strike"]
+
+    divergence_value = odte_premium_net - odte_signed_delta
+
+    pulse_drop_signal = (
+        1 if odte_premium_net > 0
+        else -1 if odte_premium_net < 0
+        else 0
+    )
+
+    return {
+        "symbol": symbol,
+        "spot": spot,
+        "expiration": expiration,
+        "odte_exp": odte_exp,
+        "expirations": expirations,
+
+        "odte_premium_net": odte_premium_net,
+        "all_exp_premium_net": all_exp_premium_net,
+
+        "odte_signed_delta": odte_signed_delta,
+        "odte_delta_bias": bias_from_value(odte_signed_delta),
+        "all_exp_delta_bias": bias_from_value(all_exp_premium_net),
+
+        "call_gamma": call_gamma_level,
+        "put_gamma": put_gamma_level,
+        "gamma_regime": gamma_regime,
+        "gamma_signal": gamma_signal,
+
+        "divergence_value": divergence_value,
+        "pulse_drop_signal": pulse_drop_signal,
+
+        "odte_rows": len(odte_df),
+        "all_exp_rows": len(chain_df),
+
+        "chain_df": chain_df,
+        "chart_df": chart_df,
     }
 
 
@@ -494,7 +695,8 @@ if __name__ == "__main__":
 
     data = get_spx_flow_data(
         symbol=test_symbol,
-        width=150
+        width=150,
+        all_exp_count=3,
     )
 
     chain = data["chain_df"]
@@ -536,3 +738,7 @@ if __name__ == "__main__":
 
     print("Head:")
     print(chain.head())
+
+    print("Snapshot:")
+    snapshot = get_flow_snapshot(test_symbol)
+    print(snapshot.keys())
