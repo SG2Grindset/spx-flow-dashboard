@@ -25,12 +25,13 @@ HEADERS = {
 # SYMBOL CONFIG
 # ============================================================
 
-SUPPORTED_SYMBOLS = ["SPX", "SPY", "QQQ", "TSLA", "AAPL"]
+SUPPORTED_SYMBOLS = ["SPX", "XSP", "SPY", "QQQ", "TSLA", "AAPL"]
 
 EQUITY_WEEKLY_SYMBOLS = ["TSLA", "AAPL"]
 
 MAX_DAYS_OUT = {
     "SPX": 1,
+    "XSP": 1,
     "SPY": 1,
     "QQQ": 1,
     "TSLA": 7,
