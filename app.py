@@ -34,6 +34,7 @@ def check_password():
             background: radial-gradient(circle at top left, #14202b 0%, #070b10 45%, #020407 100%) !important;
             color: white !important;
         }
+
         .login-box {
             max-width: 480px;
             margin: 120px auto 0 auto;
@@ -44,18 +45,56 @@ def check_password():
             box-shadow: 0 0 25px rgba(0, 212, 106, .25);
             text-align: center;
         }
+
         .login-title {
             color: #00d46a;
             font-size: 34px;
             font-weight: 900;
         }
+
         .login-subtitle {
             color: #ffdd00;
             font-size: 16px;
             font-weight: 800;
             margin-top: 8px;
         }
+
+        .password-label {
+            color: #ffffff !important;
+            font-size: 18px;
+            font-weight: 900;
+            margin-bottom: 8px;
+            margin-top: 20px;
+        }
+
+        div[data-testid="stTextInput"] input {
+            background-color: #ffffff !important;
+            color: #111111 !important;
+            -webkit-text-fill-color: #111111 !important;
+            font-weight: 900 !important;
+            border-radius: 10px !important;
+            border: 2px solid #00d46a !important;
+            height: 52px !important;
+            font-size: 18px !important;
+        }
+
+        div[data-testid="stButton"] button {
+            background: linear-gradient(180deg, #00d46a, #00994d) !important;
+            color: #ffffff !important;
+            font-weight: 900 !important;
+            font-size: 18px !important;
+            border-radius: 12px !important;
+            border: 1px solid #00ff88 !important;
+            height: 56px !important;
+            box-shadow: 0 0 18px rgba(0,212,106,.45) !important;
+        }
         </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
         <div class="login-box">
             <div class="login-title">🔐 SG2 FLOW Dashboard</div>
             <div class="login-subtitle">Private Access Required</div>
@@ -64,64 +103,22 @@ def check_password():
         unsafe_allow_html=True,
     )
 
-st.markdown(
-    """
-    <style>
-    .password-label {
-        color: #ffffff !important;
-        font-size: 18px;
-        font-weight: 900;
-        margin-bottom: 8px;
-        margin-top: 20px;
-    }
+    st.markdown(
+        '<div class="password-label">Enter Password</div>',
+        unsafe_allow_html=True,
+    )
 
-    div[data-testid="stTextInput"] input {
-        background-color: #ffffff !important;
-        color: #111111 !important;
-        font-weight: 800 !important;
-        border-radius: 10px !important;
-        border: 2px solid #00d46a !important;
-        height: 52px !important;
-        font-size: 18px !important;
-    }
+    password = st.text_input(
+        "",
+        type="password",
+        label_visibility="collapsed",
+    )
 
-    div[data-testid="stButton"] button {
-        background: linear-gradient(180deg, #00d46a, #00994d) !important;
-        color: #ffffff !important;
-        font-weight: 900 !important;
-        font-size: 18px !important;
-        border-radius: 12px !important;
-        border: 1px solid #00ff88 !important;
-        height: 56px !important;
-        box-shadow: 0 0 18px rgba(0,212,106,.45) !important;
-        transition: all .2s ease-in-out;
-    }
-
-    div[data-testid="stButton"] button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 0 28px rgba(0,255,136,.65) !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.markdown(
-    '<div class="password-label">Enter Password</div>',
-    unsafe_allow_html=True,
-)
-
-password = st.text_input(
-    "",
-    type="password",
-    label_visibility="collapsed",
-)
-
-if st.button("ENTER THE FLOW by SG2", use_container_width=True):
+    if st.button("ENTER THE FLOW by SG2", use_container_width=True):
         try:
             correct_password = st.secrets["APP_PASSWORD"]
         except Exception:
-            st.error("APP_PASSWORD is missing from .streamlit/secrets.toml")
+            st.error("APP_PASSWORD missing from secrets.toml")
             return False
 
         if password == correct_password:
@@ -226,14 +223,10 @@ section[data-testid="stSidebar"] div[data-baseweb="input"] input {
     color: #000000 !important;
     -webkit-text-fill-color: #000000 !important;
     opacity: 1 !important;
-    font-weight: 700 !important;
+    font-weight: 900 !important;
 }
 
-section[data-testid="stSidebar"] div[data-baseweb="select"] {
-    background-color: #ffffff !important;
-    border-radius: 8px !important;
-}
-
+section[data-testid="stSidebar"] div[data-baseweb="select"],
 section[data-testid="stSidebar"] div[data-baseweb="input"] {
     background-color: #ffffff !important;
     border-radius: 8px !important;
@@ -242,9 +235,38 @@ section[data-testid="stSidebar"] div[data-baseweb="input"] {
 section[data-testid="stSidebar"] input {
     background-color: #ffffff !important;
     color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
 }
 
-section[data-testid="stSidebar"] .stSlider div {
+section[data-testid="stSidebar"] [data-baseweb="select"] div,
+section[data-testid="stSidebar"] [data-baseweb="select"] span,
+section[data-testid="stSidebar"] [data-baseweb="input"] div,
+section[data-testid="stSidebar"] [data-baseweb="input"] input {
+    color: #111111 !important;
+    -webkit-text-fill-color: #111111 !important;
+    opacity: 1 !important;
+    font-weight: 900 !important;
+}
+
+section[data-testid="stSidebar"] [data-baseweb="select"] svg {
+    fill: #111111 !important;
+    color: #111111 !important;
+}
+
+section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] * {
+    color: #111111 !important;
+    -webkit-text-fill-color: #111111 !important;
+    font-weight: 900 !important;
+}
+
+section[data-testid="stSidebar"] .stNumberInput input {
+    color: #111111 !important;
+    -webkit-text-fill-color: #111111 !important;
+    font-weight: 900 !important;
+}
+
+section[data-testid="stSidebar"] .stSlider label,
+section[data-testid="stSidebar"] .stSlider span {
     color: #ffffff !important;
 }
 
@@ -360,48 +382,6 @@ section[data-testid="stSidebar"] .stSlider div {
 
 hr {
     border-color: #263241;
-}
-
-/* FINAL SIDEBAR VISIBILITY OVERRIDES */
-section[data-testid="stSidebar"] [data-baseweb="select"] div,
-section[data-testid="stSidebar"] [data-baseweb="select"] span,
-section[data-testid="stSidebar"] [data-baseweb="input"] div,
-section[data-testid="stSidebar"] [data-baseweb="input"] input {
-    color: #111111 !important;
-    -webkit-text-fill-color: #111111 !important;
-    opacity: 1 !important;
-    font-weight: 900 !important;
-}
-
-section[data-testid="stSidebar"] [data-baseweb="select"] svg {
-    fill: #111111 !important;
-    color: #111111 !important;
-}
-
-section[data-testid="stSidebar"] [data-baseweb="select"],
-section[data-testid="stSidebar"] [data-baseweb="input"] {
-    background-color: #ffffff !important;
-}
-
-section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] * {
-    color: #111111 !important;
-    -webkit-text-fill-color: #111111 !important;
-    font-weight: 900 !important;
-}
-
-section[data-testid="stSidebar"] .stNumberInput input {
-    color: #111111 !important;
-    -webkit-text-fill-color: #111111 !important;
-    font-weight: 900 !important;
-}
-
-section[data-testid="stSidebar"] .stSlider label,
-section[data-testid="stSidebar"] .stSlider span {
-    color: #ffffff !important;
-}
-
-section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
-    color: #111111 !important;
 }
 </style>
 """,
@@ -590,6 +570,9 @@ symbol = st.session_state.selected_symbol
 icon = SYMBOL_ICONS.get(symbol, "📊")
 
 
+# =========================================================
+# ACTIVE BAR
+# =========================================================
 st.markdown(
     f"""
     <div class="active-bar">
@@ -785,6 +768,9 @@ st.markdown(header_html, unsafe_allow_html=True)
 left_chart, right_matrix = st.columns([4.2, 0.8])
 
 
+# =========================================================
+# FLOW CHART
+# =========================================================
 with left_chart:
     fig = go.Figure()
 
@@ -919,6 +905,9 @@ with left_chart:
     )
 
 
+# =========================================================
+# MATRIX
+# =========================================================
 with right_matrix:
     if show_matrix:
         st.markdown('<div class="matrix-card">', unsafe_allow_html=True)
@@ -995,6 +984,9 @@ with right_matrix:
         st.markdown("</div>", unsafe_allow_html=True)
 
 
+# =========================================================
+# FOOTER
+# =========================================================
 st.caption(
     "All values are real-time estimates. Not financial advice. Data may be delayed."
 )
