@@ -18,6 +18,75 @@ st.set_page_config(
 
 
 # =========================================================
+# PASSWORD PROTECTION
+# =========================================================
+def check_password():
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if st.session_state.authenticated:
+        return True
+
+    st.markdown(
+        """
+        <style>
+        html, body, .stApp {
+            background: radial-gradient(circle at top left, #14202b 0%, #070b10 45%, #020407 100%) !important;
+            color: white !important;
+        }
+        .login-box {
+            max-width: 480px;
+            margin: 120px auto 0 auto;
+            padding: 30px;
+            border-radius: 18px;
+            background: linear-gradient(180deg, #111923, #0b1118);
+            border: 1px solid #00d46a;
+            box-shadow: 0 0 25px rgba(0, 212, 106, .25);
+            text-align: center;
+        }
+        .login-title {
+            color: #00d46a;
+            font-size: 34px;
+            font-weight: 900;
+        }
+        .login-subtitle {
+            color: #ffdd00;
+            font-size: 16px;
+            font-weight: 800;
+            margin-top: 8px;
+        }
+        </style>
+        <div class="login-box">
+            <div class="login-title">🔐 SG2 FLOW Dashboard</div>
+            <div class="login-subtitle">Private Access Required</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    password = st.text_input("Enter Password", type="password")
+
+    if st.button("Login", use_container_width=True):
+        try:
+            correct_password = st.secrets["APP_PASSWORD"]
+        except Exception:
+            st.error("APP_PASSWORD is missing from .streamlit/secrets.toml")
+            return False
+
+        if password == correct_password:
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect password")
+
+    return False
+
+
+if not check_password():
+    st.stop()
+
+
+# =========================================================
 # SYMBOL CONFIG
 # =========================================================
 SYMBOLS = ["SPX", "SPY", "QQQ", "TSLA", "AAPL"]
@@ -97,9 +166,6 @@ section[data-testid="stSidebar"] * {
     font-weight: 900 !important;
 }
 
-/* =========================================
-SIDEBAR INPUT TEXT FIX
-========================================= */
 section[data-testid="stSidebar"] input,
 section[data-testid="stSidebar"] textarea,
 section[data-testid="stSidebar"] select,
@@ -112,25 +178,21 @@ section[data-testid="stSidebar"] div[data-baseweb="input"] input {
     font-weight: 700 !important;
 }
 
-/* Dropdown backgrounds */
 section[data-testid="stSidebar"] div[data-baseweb="select"] {
     background-color: #ffffff !important;
     border-radius: 8px !important;
 }
 
-/* Number input backgrounds */
 section[data-testid="stSidebar"] div[data-baseweb="input"] {
     background-color: #ffffff !important;
     border-radius: 8px !important;
 }
 
-/* Actual input fields */
 section[data-testid="stSidebar"] input {
     background-color: #ffffff !important;
     color: #000000 !important;
 }
 
-/* Slider values */
 section[data-testid="stSidebar"] .stSlider div {
     color: #ffffff !important;
 }
@@ -249,11 +311,7 @@ hr {
     border-color: #263241;
 }
 
-/* =========================================================
-FINAL SIDEBAR VISIBILITY OVERRIDES
-========================================================= */
-
-/* Main visible values */
+/* FINAL SIDEBAR VISIBILITY OVERRIDES */
 section[data-testid="stSidebar"] [data-baseweb="select"] div,
 section[data-testid="stSidebar"] [data-baseweb="select"] span,
 section[data-testid="stSidebar"] [data-baseweb="input"] div,
@@ -264,43 +322,36 @@ section[data-testid="stSidebar"] [data-baseweb="input"] input {
     font-weight: 900 !important;
 }
 
-/* Dropdown arrows */
 section[data-testid="stSidebar"] [data-baseweb="select"] svg {
     fill: #111111 !important;
     color: #111111 !important;
 }
 
-/* White widget backgrounds */
 section[data-testid="stSidebar"] [data-baseweb="select"],
 section[data-testid="stSidebar"] [data-baseweb="input"] {
     background-color: #ffffff !important;
 }
 
-/* Selectbox displayed text */
 section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] * {
     color: #111111 !important;
     -webkit-text-fill-color: #111111 !important;
     font-weight: 900 !important;
 }
 
-/* Number input visible values */
 section[data-testid="stSidebar"] .stNumberInput input {
     color: #111111 !important;
     -webkit-text-fill-color: #111111 !important;
     font-weight: 900 !important;
 }
 
-/* Force slider labels visible */
 section[data-testid="stSidebar"] .stSlider label,
 section[data-testid="stSidebar"] .stSlider span {
     color: #ffffff !important;
 }
 
-/* Selected dropdown text */
 section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
     color: #111111 !important;
 }
-
 </style>
 """,
     unsafe_allow_html=True,
@@ -388,9 +439,6 @@ with st.sidebar:
     st.caption("Secondary bias model: Signed Delta Notional = Spot × Delta × Contracts × 100.")
 
 
-# =========================================================
-# AUTO REFRESH
-# =========================================================
 if auto_refresh:
     st_autorefresh(
         interval=refresh_interval * 1000,
@@ -491,9 +539,6 @@ symbol = st.session_state.selected_symbol
 icon = SYMBOL_ICONS.get(symbol, "📊")
 
 
-# =========================================================
-# ACTIVE BAR
-# =========================================================
 st.markdown(
     f"""
     <div class="active-bar">
@@ -689,9 +734,6 @@ st.markdown(header_html, unsafe_allow_html=True)
 left_chart, right_matrix = st.columns([4.2, 0.8])
 
 
-# =========================================================
-# FLOW CHART
-# =========================================================
 with left_chart:
     fig = go.Figure()
 
@@ -826,9 +868,6 @@ with left_chart:
     )
 
 
-# =========================================================
-# MATRIX
-# =========================================================
 with right_matrix:
     if show_matrix:
         st.markdown('<div class="matrix-card">', unsafe_allow_html=True)
@@ -905,9 +944,6 @@ with right_matrix:
         st.markdown("</div>", unsafe_allow_html=True)
 
 
-# =========================================================
-# FOOTER
-# =========================================================
 st.caption(
     "All values are real-time estimates. Not financial advice. Data may be delayed."
 )
