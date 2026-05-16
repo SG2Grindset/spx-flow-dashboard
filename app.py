@@ -1,8 +1,8 @@
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
+from datetime import datetime
 
 from flow_engine import get_flow_snapshot
 
@@ -430,6 +430,7 @@ with st.sidebar:
 
     show_flow_dots = st.checkbox("Show FLOW Dots", value=True)
     show_signed_delta_line = st.checkbox("Show Signed Delta Line", value=True)
+    show_right_labels = st.checkbox("Show Right Edge Labels", value=True)
 
     default_flow_dot_threshold = FLOW_DOT_THRESHOLDS.get(symbol, 25_000_000)
     default_divergence_threshold = DIVERGENCE_THRESHOLDS.get(symbol, 10_000_000)
@@ -591,10 +592,27 @@ def compute_volume_stats(snapshot, odte_exp):
     call_volume = calls["volume"].sum()
     put_volume = puts["volume"].sum()
     total_volume = call_volume + put_volume
-
     pc_ratio = put_volume / call_volume if call_volume > 0 else 0
 
     return call_volume, put_volume, total_volume, pc_ratio
+
+
+def add_right_edge_label(fig, x, y, text, bg, yref="y", xshift=14):
+    fig.add_annotation(
+        x=x,
+        y=y,
+        text=text,
+        showarrow=False,
+        font=dict(color="black", size=12, family="Arial Black"),
+        bgcolor=bg,
+        bordercolor=bg,
+        borderwidth=1,
+        borderpad=3,
+        xanchor="left",
+        yanchor="middle",
+        xshift=xshift,
+        yref=yref,
+    )
 
 
 # =========================================================
@@ -882,7 +900,7 @@ with left_chart:
                 y=history_df["odte_flow"],
                 name="0DTE Flow",
                 mode="lines",
-                line=dict(color="#ffe100", width=4, shape="spline"),
+                line=dict(color="#2cff1f", width=4, shape="spline"),
             )
         )
 
@@ -892,7 +910,7 @@ with left_chart:
                 y=history_df["all_exp_flow"],
                 name="All Exp Flow",
                 mode="lines",
-                line=dict(color="#2cff1f", width=4, shape="spline"),
+                line=dict(color="#ffe100", width=4, shape="spline"),
             )
         )
 
@@ -934,10 +952,14 @@ with left_chart:
                     go.Scatter(
                         x=dot_df["time"],
                         y=dot_df["odte_flow"],
-                        mode="markers",
+                        mode="markers+text",
                         name="FLOW X",
+                        text=["FLOW"] * len(dot_df),
+                        textposition="top center",
+                        textfont=dict(color="white", size=10),
                         marker=dict(
                             size=11,
+                            symbol="diamond",
                             color=[
                                 "#26ff38" if v > 0 else "#ff3030"
                                 for v in dot_df["odte_flow"]
@@ -946,6 +968,51 @@ with left_chart:
                         ),
                     )
                 )
+
+        if show_right_labels and len(history_df) > 0:
+            latest_time = history_df["time"].iloc[-1]
+            latest_odte = history_df["odte_flow"].iloc[-1]
+            latest_all = history_df["all_exp_flow"].iloc[-1]
+            latest_price = history_df["price"].iloc[-1]
+
+            add_right_edge_label(
+                fig,
+                latest_time,
+                latest_odte,
+                fmt_money(latest_odte),
+                "#2cff1f",
+                yref="y",
+            )
+
+            add_right_edge_label(
+                fig,
+                latest_time,
+                latest_all,
+                fmt_money(latest_all),
+                "#ffe100",
+                yref="y",
+            )
+
+            if show_signed_delta_line:
+                latest_signed = history_df["signed_delta"].iloc[-1]
+
+                add_right_edge_label(
+                    fig,
+                    latest_time,
+                    latest_signed,
+                    fmt_money(latest_signed),
+                    "#00e5ff",
+                    yref="y",
+                )
+
+            add_right_edge_label(
+                fig,
+                latest_time,
+                latest_price,
+                f"{latest_price:.2f}",
+                "white",
+                yref="y2",
+            )
 
         fig.add_hline(
             y=flow_dot_threshold,
@@ -969,7 +1036,7 @@ with left_chart:
         paper_bgcolor="#111923",
         plot_bgcolor="#252a2f",
         height=520,
-        margin=dict(l=40, r=60, t=50, b=45),
+        margin=dict(l=40, r=95, t=50, b=45),
         legend=dict(
             orientation="h",
             yanchor="bottom",
