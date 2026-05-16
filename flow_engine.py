@@ -1,12 +1,12 @@
 # ============================================================
 # flow_engine.py
 # SPX / SPY / QQQ / TSLA / AAPL Options Data Engine - Tradier
-# Pulls Today + Next Expirations
-# Greeks Enabled + Flattened Greeks
+# Pulls short-dated option flow + Greeks
 # Includes get_flow_snapshot() for Streamlit app.py
 # ============================================================
 
 import os
+from datetime import datetime
 import requests
 import pandas as pd
 from dotenv import load_dotenv
@@ -27,6 +27,17 @@ HEADERS = {
 # ============================================================
 
 SUPPORTED_SYMBOLS = ["SPX", "SPY", "QQQ", "TSLA", "AAPL"]
+
+EQUITY_WEEKLY_SYMBOLS = ["TSLA", "AAPL"]
+DAILY_EXPIRATION_SYMBOLS = ["SPX", "SPY", "QQQ"]
+
+MAX_DAYS_OUT = {
+    "SPX": 1,
+    "SPY": 1,
+    "QQQ": 1,
+    "TSLA": 7,
+    "AAPL": 7,
+}
 
 GAMMA_LEVELS = {
     "SPX": {
@@ -52,11 +63,16 @@ GAMMA_LEVELS = {
 }
 
 
+# ============================================================
+# SYMBOL ROOT
+# ============================================================
+
 def get_option_root(symbol):
     """
-    For SPX, Tradier often uses SPX for expirations/chains.
-    If SPX chains return empty, try changing this to SPXW.
-    For SPY, QQQ, TSLA, AAPL, the root is the same as the symbol.
+    Tradier option root mapping.
+
+    SPX may sometimes need SPXW depending on the Tradier account/data response.
+    If SPX chains come back empty, try changing SPX return from "SPX" to "SPXW".
     """
     symbol = symbol.upper().strip()
 
@@ -158,9 +174,87 @@ def get_expirations(symbol="SPY"):
     return expirations
 
 
-def get_next_expiration(symbol="SPY"):
+def get_front_expiration(symbol="SPY"):
+    """
+    Chooses the best front expiration for dashboard flow.
+
+    SPX / SPY / QQQ:
+        Prefer same-day or next-day expirations.
+
+    TSLA / AAPL:
+        Prefer nearest weekly expiration within 7 calendar days.
+
+    Fallback:
+        If none match the day filter, use the first available Tradier expiration.
+    """
+    symbol = symbol.upper().strip()
     expirations = get_expirations(symbol)
+
+    today = datetime.now().date()
+    max_days = MAX_DAYS_OUT.get(symbol, 7)
+
+    valid_expirations = []
+
+    for exp in expirations:
+        try:
+            exp_date = datetime.strptime(str(exp), "%Y-%m-%d").date()
+            days_out = (exp_date - today).days
+
+            if 0 <= days_out <= max_days:
+                valid_expirations.append(exp)
+
+        except Exception:
+            pass
+
+    if valid_expirations:
+        return valid_expirations[0]
+
     return expirations[0]
+
+
+def get_filtered_expirations(symbol="SPY", all_exp_count=5):
+    """
+    Returns expirations for the all-exp flow model.
+
+    For SPX/SPY/QQQ:
+        Uses the first N available expirations.
+
+    For TSLA/AAPL:
+        Uses expirations up to 21 calendar days first.
+        If fewer than requested, fills from Tradier's next available expirations.
+    """
+    symbol = symbol.upper().strip()
+    expirations = get_expirations(symbol)
+
+    if symbol not in EQUITY_WEEKLY_SYMBOLS:
+        return expirations[:all_exp_count]
+
+    today = datetime.now().date()
+    short_dated = []
+
+    for exp in expirations:
+        try:
+            exp_date = datetime.strptime(str(exp), "%Y-%m-%d").date()
+            days_out = (exp_date - today).days
+
+            if 0 <= days_out <= 21:
+                short_dated.append(exp)
+
+        except Exception:
+            pass
+
+    combined = []
+
+    for exp in short_dated + expirations:
+        if exp not in combined:
+            combined.append(exp)
+
+    return combined[:all_exp_count]
+
+
+# Backward-compatible name
+def get_next_expiration(symbol="SPY"):
+    return get_front_expiration(symbol)
 
 
 # ============================================================
@@ -217,7 +311,7 @@ def get_option_chain(symbol="SPY", expiration=None):
     option_root = get_option_root(symbol)
 
     if expiration is None:
-        expiration = get_next_expiration(symbol)
+        expiration = get_front_expiration(symbol)
 
     data = _tradier_get(
         "markets/options/chains",
@@ -447,8 +541,6 @@ def bias_from_value(value):
 
 def get_spx_flow_data(symbol="SPY", width=10, all_exp_count=3):
     """
-    Name kept so existing dashboard imports do not break.
-
     Supports:
     - SPX
     - SPY
@@ -456,9 +548,13 @@ def get_spx_flow_data(symbol="SPY", width=10, all_exp_count=3):
     - TSLA
     - AAPL
 
-    Pulls:
-    - Today expiration
-    - Next expirations based on all_exp_count
+    Front expiration:
+    - SPX/SPY/QQQ: same-day or next-day if available.
+    - TSLA/AAPL: nearest expiration within 7 days if available.
+
+    All expiration model:
+    - Uses all_exp_count expirations.
+    - TSLA/AAPL prioritize expirations within 21 days.
     """
 
     symbol = symbol.upper().strip()
@@ -466,7 +562,13 @@ def get_spx_flow_data(symbol="SPY", width=10, all_exp_count=3):
 
     spot_price = get_price(symbol)
 
-    expirations = get_expirations(symbol)[:all_exp_count]
+    front_expiration = get_front_expiration(symbol)
+    expirations = get_filtered_expirations(symbol, all_exp_count=all_exp_count)
+
+    if front_expiration not in expirations:
+        expirations = [front_expiration] + expirations
+
+    expirations = expirations[:all_exp_count]
 
     chains = []
 
@@ -505,7 +607,7 @@ def get_spx_flow_data(symbol="SPY", width=10, all_exp_count=3):
         "symbol": symbol,
         "option_root": option_root,
         "spot_price": spot_price,
-        "expiration": expirations[0],
+        "expiration": front_expiration,
         "expirations": expirations,
         "chain_df": chain_df,
         "flow_summary": flow_summary,
@@ -523,12 +625,6 @@ def get_flow_snapshot(
     lookback_hours=2,
     strike_width=100,
 ):
-    """
-    Wrapper used by app.py.
-
-    Converts get_spx_flow_data() output into the newer dashboard format.
-    """
-
     symbol = symbol.upper().strip()
 
     data = get_spx_flow_data(
@@ -688,15 +784,18 @@ if __name__ == "__main__":
 
     print("Expirations:")
     expirations = get_expirations(test_symbol)
-    print(expirations[:5])
+    print(expirations[:10])
 
-    print("Using first 3 expirations:")
-    print(expirations[:3])
+    print("Front expiration:")
+    print(get_front_expiration(test_symbol))
+
+    print("Filtered expirations:")
+    print(get_filtered_expirations(test_symbol, all_exp_count=5))
 
     data = get_spx_flow_data(
         symbol=test_symbol,
         width=150,
-        all_exp_count=3,
+        all_exp_count=5,
     )
 
     chain = data["chain_df"]
@@ -712,32 +811,6 @@ if __name__ == "__main__":
 
     print("Columns:")
     print(chain.columns.tolist())
-
-    print("Greek sample:")
-    print(
-        chain[
-            [
-                c for c in [
-                    "display_symbol",
-                    "symbol_root",
-                    "expiration",
-                    "strike",
-                    "type",
-                    "delta",
-                    "gamma",
-                    "theta",
-                    "vega",
-                    "iv",
-                    "open_interest",
-                    "volume",
-                ]
-                if c in chain.columns
-            ]
-        ].head()
-    )
-
-    print("Head:")
-    print(chain.head())
 
     print("Snapshot:")
     snapshot = get_flow_snapshot(test_symbol)
