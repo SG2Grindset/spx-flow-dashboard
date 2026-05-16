@@ -1,8 +1,7 @@
 # ============================================================
 # flow_engine.py
 # SPX / SPY / QQQ / TSLA / AAPL Options Data Engine - Tradier
-# Pulls short-dated option flow + Greeks
-# Includes get_flow_snapshot() for Streamlit app.py
+# Live short-dated option flow + Greeks + live gamma levels
 # ============================================================
 
 import os
@@ -29,7 +28,6 @@ HEADERS = {
 SUPPORTED_SYMBOLS = ["SPX", "SPY", "QQQ", "TSLA", "AAPL"]
 
 EQUITY_WEEKLY_SYMBOLS = ["TSLA", "AAPL"]
-DAILY_EXPIRATION_SYMBOLS = ["SPX", "SPY", "QQQ"]
 
 MAX_DAYS_OUT = {
     "SPX": 1,
@@ -39,41 +37,12 @@ MAX_DAYS_OUT = {
     "AAPL": 7,
 }
 
-GAMMA_LEVELS = {
-    "SPX": {
-        "call_gamma": 5850,
-        "put_gamma": 5800,
-    },
-    "SPY": {
-        "call_gamma": 585,
-        "put_gamma": 580,
-    },
-    "QQQ": {
-        "call_gamma": 510,
-        "put_gamma": 500,
-    },
-    "TSLA": {
-        "call_gamma": 450,
-        "put_gamma": 430,
-    },
-    "AAPL": {
-        "call_gamma": 215,
-        "put_gamma": 210,
-    },
-}
-
 
 # ============================================================
 # SYMBOL ROOT
 # ============================================================
 
 def get_option_root(symbol):
-    """
-    Tradier option root mapping.
-
-    SPX may sometimes need SPXW depending on the Tradier account/data response.
-    If SPX chains come back empty, try changing SPX return from "SPX" to "SPXW".
-    """
     symbol = symbol.upper().strip()
 
     if symbol == "SPX":
@@ -132,9 +101,7 @@ def get_price(symbol="SPY"):
         except Exception:
             pass
 
-    raise Exception(
-        f"Could not get valid {symbol} price. Quote response: {quote}"
-    )
+    raise Exception(f"Could not get valid {symbol} price. Quote response: {quote}")
 
 
 # ============================================================
@@ -175,18 +142,6 @@ def get_expirations(symbol="SPY"):
 
 
 def get_front_expiration(symbol="SPY"):
-    """
-    Chooses the best front expiration for dashboard flow.
-
-    SPX / SPY / QQQ:
-        Prefer same-day or next-day expirations.
-
-    TSLA / AAPL:
-        Prefer nearest weekly expiration within 7 calendar days.
-
-    Fallback:
-        If none match the day filter, use the first available Tradier expiration.
-    """
     symbol = symbol.upper().strip()
     expirations = get_expirations(symbol)
 
@@ -213,16 +168,6 @@ def get_front_expiration(symbol="SPY"):
 
 
 def get_filtered_expirations(symbol="SPY", all_exp_count=5):
-    """
-    Returns expirations for the all-exp flow model.
-
-    For SPX/SPY/QQQ:
-        Uses the first N available expirations.
-
-    For TSLA/AAPL:
-        Uses expirations up to 21 calendar days first.
-        If fewer than requested, fills from Tradier's next available expirations.
-    """
     symbol = symbol.upper().strip()
     expirations = get_expirations(symbol)
 
@@ -252,7 +197,6 @@ def get_filtered_expirations(symbol="SPY", all_exp_count=5):
     return combined[:all_exp_count]
 
 
-# Backward-compatible name
 def get_next_expiration(symbol="SPY"):
     return get_front_expiration(symbol)
 
@@ -503,6 +447,7 @@ def summarize_flow(df):
             "net_premium": 0,
             "call_volume": 0,
             "put_volume": 0,
+            "total_volume": 0,
         }
 
     calls = df[df["type"] == "call"]
@@ -512,6 +457,7 @@ def summarize_flow(df):
     put_premium = puts["premium"].sum()
     call_volume = calls["volume"].sum()
     put_volume = puts["volume"].sum()
+    total_volume = call_volume + put_volume
 
     return {
         "call_premium": call_premium,
@@ -519,6 +465,7 @@ def summarize_flow(df):
         "net_premium": call_premium - put_premium,
         "call_volume": call_volume,
         "put_volume": put_volume,
+        "total_volume": total_volume,
     }
 
 
@@ -536,27 +483,116 @@ def bias_from_value(value):
 
 
 # ============================================================
+# LIVE GAMMA LEVELS
+# ============================================================
+
+def calculate_live_gamma_levels(chain_df, spot_price):
+    """
+    Calculates live gamma levels from current option-chain Greeks.
+
+    Call Gamma Level:
+        Strike with largest call gamma exposure.
+
+    Put Gamma Level:
+        Strike with largest put gamma exposure.
+
+    Formula:
+        gamma_exposure = gamma * open_interest * 100 * spot
+
+    This updates every dashboard refresh.
+    """
+
+    if chain_df is None or chain_df.empty:
+        return {
+            "call_gamma": 0,
+            "put_gamma": 0,
+            "call_gamma_exposure": 0,
+            "put_gamma_exposure": 0,
+        }
+
+    required_cols = ["strike", "type", "gamma", "open_interest"]
+
+    for col in required_cols:
+        if col not in chain_df.columns:
+            return {
+                "call_gamma": 0,
+                "put_gamma": 0,
+                "call_gamma_exposure": 0,
+                "put_gamma_exposure": 0,
+            }
+
+    df = chain_df.copy()
+
+    df["gamma"] = pd.to_numeric(df["gamma"], errors="coerce").fillna(0)
+    df["open_interest"] = pd.to_numeric(df["open_interest"], errors="coerce").fillna(0)
+    df["strike"] = pd.to_numeric(df["strike"], errors="coerce").fillna(0)
+
+    df = df[
+        (df["gamma"] > 0)
+        & (df["open_interest"] > 0)
+        & (df["strike"] > 0)
+    ].copy()
+
+    if df.empty:
+        return {
+            "call_gamma": 0,
+            "put_gamma": 0,
+            "call_gamma_exposure": 0,
+            "put_gamma_exposure": 0,
+        }
+
+    df["gamma_exposure"] = (
+        df["gamma"]
+        * df["open_interest"]
+        * 100
+        * float(spot_price)
+    )
+
+    calls = df[df["type"] == "call"].copy()
+    puts = df[df["type"] == "put"].copy()
+
+    call_gamma_level = 0
+    put_gamma_level = 0
+    call_gamma_exposure = 0
+    put_gamma_exposure = 0
+
+    if not calls.empty:
+        call_group = (
+            calls
+            .groupby("strike", as_index=False)["gamma_exposure"]
+            .sum()
+            .sort_values("gamma_exposure", ascending=False)
+        )
+
+        top_call = call_group.iloc[0]
+        call_gamma_level = float(top_call["strike"])
+        call_gamma_exposure = float(top_call["gamma_exposure"])
+
+    if not puts.empty:
+        put_group = (
+            puts
+            .groupby("strike", as_index=False)["gamma_exposure"]
+            .sum()
+            .sort_values("gamma_exposure", ascending=False)
+        )
+
+        top_put = put_group.iloc[0]
+        put_gamma_level = float(top_put["strike"])
+        put_gamma_exposure = float(top_put["gamma_exposure"])
+
+    return {
+        "call_gamma": call_gamma_level,
+        "put_gamma": put_gamma_level,
+        "call_gamma_exposure": call_gamma_exposure,
+        "put_gamma_exposure": put_gamma_exposure,
+    }
+
+
+# ============================================================
 # MAIN DATA FUNCTION
 # ============================================================
 
 def get_spx_flow_data(symbol="SPY", width=10, all_exp_count=3):
-    """
-    Supports:
-    - SPX
-    - SPY
-    - QQQ
-    - TSLA
-    - AAPL
-
-    Front expiration:
-    - SPX/SPY/QQQ: same-day or next-day if available.
-    - TSLA/AAPL: nearest expiration within 7 days if available.
-
-    All expiration model:
-    - Uses all_exp_count expirations.
-    - TSLA/AAPL prioritize expirations within 21 days.
-    """
-
     symbol = symbol.upper().strip()
     option_root = get_option_root(symbol)
 
@@ -602,6 +638,7 @@ def get_spx_flow_data(symbol="SPY", width=10, all_exp_count=3):
         )
 
     flow_summary = summarize_flow(chain_df)
+    gamma_levels = calculate_live_gamma_levels(chain_df, spot_price)
 
     return {
         "symbol": symbol,
@@ -611,6 +648,7 @@ def get_spx_flow_data(symbol="SPY", width=10, all_exp_count=3):
         "expirations": expirations,
         "chain_df": chain_df,
         "flow_summary": flow_summary,
+        "gamma_levels": gamma_levels,
     }
 
 
@@ -635,13 +673,16 @@ def get_flow_snapshot(
 
     chain_df = data.get("chain_df", pd.DataFrame())
     flow_summary = data.get("flow_summary", {})
+    gamma_levels = data.get("gamma_levels", {})
 
     spot = data.get("spot_price", 0)
     expiration = data.get("expiration", "")
     expirations = data.get("expirations", [])
 
-    call_gamma_level = GAMMA_LEVELS.get(symbol, {}).get("call_gamma", 0)
-    put_gamma_level = GAMMA_LEVELS.get(symbol, {}).get("put_gamma", 0)
+    call_gamma_level = gamma_levels.get("call_gamma", 0)
+    put_gamma_level = gamma_levels.get("put_gamma", 0)
+    call_gamma_exposure = gamma_levels.get("call_gamma_exposure", 0)
+    put_gamma_exposure = gamma_levels.get("put_gamma_exposure", 0)
 
     if chain_df is None or chain_df.empty:
         return {
@@ -657,10 +698,15 @@ def get_flow_snapshot(
             "all_exp_delta_bias": "NEUTRAL",
             "call_gamma": call_gamma_level,
             "put_gamma": put_gamma_level,
+            "call_gamma_exposure": call_gamma_exposure,
+            "put_gamma_exposure": put_gamma_exposure,
             "gamma_regime": "NEUTRAL",
             "gamma_signal": 0,
             "divergence_value": 0,
             "pulse_drop_signal": 0,
+            "call_volume": 0,
+            "put_volume": 0,
+            "total_volume": 0,
             "odte_rows": 0,
             "all_exp_rows": 0,
             "chain_df": pd.DataFrame(),
@@ -681,6 +727,10 @@ def get_flow_snapshot(
 
     call_premium = calls["premium"].sum() if "premium" in calls.columns else 0
     put_premium = puts["premium"].sum() if "premium" in puts.columns else 0
+
+    call_volume = calls["volume"].sum() if "volume" in calls.columns else 0
+    put_volume = puts["volume"].sum() if "volume" in puts.columns else 0
+    total_volume = call_volume + put_volume
 
     odte_premium_net = call_premium - put_premium
     all_exp_premium_net = flow_summary.get("net_premium", 0)
@@ -754,11 +804,17 @@ def get_flow_snapshot(
 
         "call_gamma": call_gamma_level,
         "put_gamma": put_gamma_level,
+        "call_gamma_exposure": call_gamma_exposure,
+        "put_gamma_exposure": put_gamma_exposure,
         "gamma_regime": gamma_regime,
         "gamma_signal": gamma_signal,
 
         "divergence_value": divergence_value,
         "pulse_drop_signal": pulse_drop_signal,
+
+        "call_volume": call_volume,
+        "put_volume": put_volume,
+        "total_volume": total_volume,
 
         "odte_rows": len(odte_df),
         "all_exp_rows": len(chain_df),
@@ -798,20 +854,9 @@ if __name__ == "__main__":
         all_exp_count=5,
     )
 
-    chain = data["chain_df"]
+    print("Gamma Levels:")
+    print(data.get("gamma_levels", {}))
 
-    print("Chain rows:")
-    print(len(chain))
-
-    print("Expirations in dataframe:")
-    print(chain["expiration"].unique())
-
-    print("Unique option types:")
-    print(chain["type"].unique())
-
-    print("Columns:")
-    print(chain.columns.tolist())
-
-    print("Snapshot:")
     snapshot = get_flow_snapshot(test_symbol)
+    print("Snapshot keys:")
     print(snapshot.keys())
