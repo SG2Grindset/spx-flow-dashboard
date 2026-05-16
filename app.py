@@ -7,9 +7,6 @@ from datetime import datetime
 from flow_engine import get_flow_snapshot
 
 
-# =========================================================
-# PAGE CONFIG
-# =========================================================
 st.set_page_config(
     page_title="SG2 FLOW Dashboard",
     layout="wide",
@@ -108,11 +105,7 @@ def check_password():
         unsafe_allow_html=True,
     )
 
-    password = st.text_input(
-        "",
-        type="password",
-        label_visibility="collapsed",
-    )
+    password = st.text_input("", type="password", label_visibility="collapsed")
 
     if st.button("ENTER THE FLOW by SG2", use_container_width=True):
         try:
@@ -137,11 +130,10 @@ if not check_password():
 # =========================================================
 # SYMBOL CONFIG
 # =========================================================
-SYMBOLS = ["SPX", "XSP", "SPY", "QQQ", "TSLA", "AAPL"]
+SYMBOLS = ["SPX", "SPY", "QQQ", "TSLA", "AAPL"]
 
 SYMBOL_ICONS = {
     "SPX": "📈",
-    "XSP": "🧩",
     "SPY": "🕷️",
     "QQQ": "📊",
     "TSLA": "⚡",
@@ -150,7 +142,6 @@ SYMBOL_ICONS = {
 
 FLOW_DOT_THRESHOLDS = {
     "SPX": 100_000_000,
-    "XSP": 10_000_000,
     "SPY": 25_000_000,
     "QQQ": 25_000_000,
     "TSLA": 75_000_000,
@@ -159,7 +150,6 @@ FLOW_DOT_THRESHOLDS = {
 
 DIVERGENCE_THRESHOLDS = {
     "SPX": 30_000_000,
-    "XSP": 3_000_000,
     "SPY": 10_000_000,
     "QQQ": 10_000_000,
     "TSLA": 20_000_000,
@@ -168,7 +158,6 @@ DIVERGENCE_THRESHOLDS = {
 
 PULSE_DROP_THRESHOLDS = {
     "SPX": 100_000_000,
-    "XSP": 10_000_000,
     "SPY": 25_000_000,
     "QQQ": 25_000_000,
     "TSLA": 75_000_000,
@@ -180,6 +169,9 @@ PULSE_DROP_THRESHOLDS = {
 # SESSION STATE
 # =========================================================
 if "selected_symbol" not in st.session_state:
+    st.session_state.selected_symbol = "SPX"
+
+if st.session_state.selected_symbol not in SYMBOLS:
     st.session_state.selected_symbol = "SPX"
 
 symbol = st.session_state.selected_symbol
@@ -1102,7 +1094,8 @@ with right_matrix:
                         strike_width=strike_width,
                     )
                 )
-            except Exception:
+            except Exception as e:
+                st.warning(f"{sym} matrix load failed: {e}")
                 sym_snapshot = {}
 
             flow_net = safe_get(sym_snapshot, "odte_premium_net", 0)
@@ -1154,9 +1147,6 @@ with right_matrix:
         st.markdown("</div>", unsafe_allow_html=True)
 
 
-# =========================================================
-# FOOTER
-# =========================================================
 st.caption(
     "All values are real-time estimates. Not financial advice. Data may be delayed."
 )
