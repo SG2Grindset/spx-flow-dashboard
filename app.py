@@ -1,9 +1,7 @@
-import time
-from datetime import datetime
-
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
 from flow_engine import get_flow_snapshot
@@ -56,14 +54,6 @@ PULSE_DROP_THRESHOLDS = {
     "AAPL": 25_000_000,
 }
 
-PRICE_SCALE = {
-    "SPX": 5,
-    "SPY": 0.5,
-    "QQQ": 0.5,
-    "TSLA": 2.5,
-    "AAPL": 0.5,
-}
-
 
 # =========================================================
 # SESSION STATE
@@ -75,114 +65,119 @@ symbol = st.session_state.selected_symbol
 
 
 # =========================================================
-# CSS
+# CSS / DARK DASHBOARD THEME
 # =========================================================
 st.markdown(
     """
 <style>
-html, body, [class*="css"] {
-    background-color: #0b1117;
-    color: #f4f7fb;
+html, body, .stApp {
+    background: radial-gradient(circle at top left, #14202b 0%, #070b10 45%, #020407 100%) !important;
+    color: #f4f7fb !important;
+}
+
+.main .block-container {
+    background: transparent !important;
+    padding-top: 1.5rem;
+    padding-left: 1.6rem;
+    padding-right: 1.6rem;
+    max-width: 100%;
 }
 
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #111922 0%, #0b1117 100%);
+    background: linear-gradient(180deg, #111922 0%, #070b10 100%) !important;
     border-right: 1px solid #263241;
+}
+
+section[data-testid="stSidebar"] * {
+    color: #f4f7fb;
 }
 
 [data-testid="stSidebar"] label {
     color: #ffdd00 !important;
-    font-weight: 800 !important;
+    font-weight: 900 !important;
 }
 
 .stButton > button {
-    height: 64px;
-    border-radius: 14px;
-    font-size: 18px;
+    height: 58px;
+    border-radius: 13px;
+    font-size: 17px;
     font-weight: 900;
-    background: linear-gradient(180deg, #101923, #081018);
+    background: linear-gradient(180deg, #101923, #071018);
     border: 1px solid #8f7500;
     color: white;
-    box-shadow: 0 0 16px rgba(0,0,0,.35);
+    box-shadow: 0 0 16px rgba(0,0,0,.45);
 }
 
 .stButton > button[kind="primary"] {
-    background: linear-gradient(180deg, #063f27, #052417);
+    background: linear-gradient(180deg, #064225, #052417);
     border: 1px solid #00d46a;
     color: #ffffff;
-    box-shadow: 0 0 20px rgba(0, 212, 106, .35);
+    box-shadow: 0 0 22px rgba(0, 212, 106, .45);
 }
 
 .active-bar {
     width: 100%;
-    padding: 18px 0;
-    margin: 16px 0 18px 0;
+    padding: 15px 0;
+    margin: 12px 0 14px 0;
     text-align: center;
     border-radius: 14px;
     color: #ffffff;
     font-size: 22px;
     font-weight: 900;
-    background: linear-gradient(90deg, #064225, #073f25, #052416);
+    background: linear-gradient(90deg, #064225, #06381f, #052416);
     border: 1px solid #00d46a;
-    box-shadow: 0 0 22px rgba(0, 212, 106, .35);
+    box-shadow: 0 0 24px rgba(0, 212, 106, .35);
+}
+
+.metric-card,
+.header-card,
+.matrix-card {
+    background: linear-gradient(180deg, #111923, #0b1118) !important;
+    border: 1px solid #263241;
+    border-radius: 14px;
+    box-shadow: 0 0 18px rgba(0,0,0,.35);
 }
 
 .metric-card {
-    background: linear-gradient(180deg, #111923, #0d141d);
-    border: 1px solid #263241;
-    border-radius: 14px;
-    padding: 16px 22px;
-    margin-bottom: 14px;
+    padding: 14px 20px;
+    margin-bottom: 12px;
+}
+
+.header-card {
+    padding: 16px 20px;
+    margin: 8px 0 10px 0;
+}
+
+.matrix-card {
+    padding: 10px;
 }
 
 .metric-label {
     color: #ffdd00;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 900;
 }
 
 .metric-value {
-    color: #f5f7fb;
-    font-size: 23px;
+    color: #ffffff;
+    font-size: 21px;
     font-weight: 900;
 }
 
-.green-text {
-    color: #31e75f !important;
-}
-
-.red-text {
-    color: #ff4b4b !important;
-}
-
-.yellow-text {
-    color: #ffdd00 !important;
-}
-
-.header-card {
-    background: linear-gradient(180deg, #111923, #0d141d);
-    border-radius: 14px;
-    padding: 18px 22px;
-    margin: 10px 0;
-}
-
-.matrix-card {
-    background: linear-gradient(180deg, #111923, #0d141d);
-    border: 1px solid #263241;
-    border-radius: 14px;
-    padding: 18px;
-}
+.green-text { color: #31e75f !important; }
+.red-text { color: #ff4b4b !important; }
+.yellow-text { color: #ffdd00 !important; }
 
 .matrix-title {
     color: white;
-    font-size: 22px;
+    font-size: 16px;
     font-weight: 900;
-    margin-bottom: 12px;
+    margin-bottom: 6px;
 }
 
-.small-note {
-    color: #a8b2c1;
-    font-size: 13px;
+[data-testid="stDataFrame"] {
+    background: #0b1118 !important;
+    border-radius: 12px;
 }
 
 hr {
@@ -313,7 +308,7 @@ def metric_html(label, value, color_class=""):
     """
 
 
-def get_color_class(value):
+def color_class(value):
     try:
         value = float(value)
     except Exception:
@@ -326,7 +321,18 @@ def get_color_class(value):
     return ""
 
 
-def build_signal_status(value):
+def safe_get(snapshot, key, default=0):
+    if not isinstance(snapshot, dict):
+        return default
+    return snapshot.get(key, default)
+
+
+def status_from_value(value):
+    try:
+        value = float(value)
+    except Exception:
+        value = 0
+
     if value > 0:
         return "BULLISH"
     if value < 0:
@@ -334,7 +340,7 @@ def build_signal_status(value):
     return "NEUTRAL"
 
 
-def signal_dot(status):
+def dot_from_status(status):
     if status == "BULLISH":
         return "🟢"
     if status == "BEARISH":
@@ -342,14 +348,8 @@ def signal_dot(status):
     return "🟣"
 
 
-def safe_get(snapshot, key, default=0):
-    if not isinstance(snapshot, dict):
-        return default
-    return snapshot.get(key, default)
-
-
 # =========================================================
-# SYMBOL BUTTONS
+# TOP SYMBOL BUTTONS
 # =========================================================
 symbol_cols = st.columns(len(SYMBOLS))
 
@@ -391,8 +391,6 @@ try:
         lookback_hours=lookback_hours,
         strike_width=strike_width,
     )
-except TypeError:
-    snapshot = get_flow_snapshot(symbol)
 except Exception as e:
     st.error(f"Could not load flow data for {symbol}: {e}")
     st.stop()
@@ -420,24 +418,24 @@ chart_df = safe_get(snapshot, "chart_df", pd.DataFrame())
 
 
 # =========================================================
-# METRIC GRID
+# METRICS
 # =========================================================
 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
 
 r1 = st.columns(5)
 r1[0].markdown(metric_html("Spot", f"{spot:.2f}" if spot else "0"), unsafe_allow_html=True)
-r1[1].markdown(metric_html("0DTE Premium Net", fmt_money(odte_premium_net), get_color_class(odte_premium_net)), unsafe_allow_html=True)
-r1[2].markdown(metric_html("All Exp Premium Net", fmt_money(all_exp_premium_net), get_color_class(all_exp_premium_net)), unsafe_allow_html=True)
+r1[1].markdown(metric_html("0DTE Premium Net", fmt_money(odte_premium_net), color_class(odte_premium_net)), unsafe_allow_html=True)
+r1[2].markdown(metric_html("All Exp Premium Net", fmt_money(all_exp_premium_net), color_class(all_exp_premium_net)), unsafe_allow_html=True)
 r1[3].markdown(metric_html("Call Gamma", f"{call_gamma:.2f}" if call_gamma else "0", "green-text"), unsafe_allow_html=True)
 r1[4].markdown(metric_html("Put Gamma", f"{put_gamma:.2f}" if put_gamma else "0", "green-text"), unsafe_allow_html=True)
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
 r2 = st.columns(6)
-r2[0].markdown(metric_html("0DTE Signed Delta", fmt_money(odte_signed_delta), get_color_class(odte_signed_delta)), unsafe_allow_html=True)
+r2[0].markdown(metric_html("0DTE Signed Delta", fmt_money(odte_signed_delta), color_class(odte_signed_delta)), unsafe_allow_html=True)
 r2[1].markdown(metric_html("0DTE Delta Bias", odte_delta_bias, "red-text" if "BEAR" in str(odte_delta_bias) else "green-text" if "BULL" in str(odte_delta_bias) else ""), unsafe_allow_html=True)
 r2[2].markdown(metric_html("All Exp Delta Bias", all_exp_delta_bias, "red-text" if "BEAR" in str(all_exp_delta_bias) else "green-text" if "BULL" in str(all_exp_delta_bias) else ""), unsafe_allow_html=True)
-r2[3].markdown(metric_html("Gamma Regime", gamma_regime, "red-text" if "BELOW" in str(gamma_regime) or "BEAR" in str(gamma_regime) else "green-text" if "ABOVE" in str(gamma_regime) or "BULL" in str(gamma_regime) else ""), unsafe_allow_html=True)
+r2[3].markdown(metric_html("Gamma Regime", gamma_regime, "red-text" if "BELOW" in str(gamma_regime) else "green-text" if "ABOVE" in str(gamma_regime) else ""), unsafe_allow_html=True)
 r2[4].markdown(metric_html("0DTE Rows", odte_rows), unsafe_allow_html=True)
 r2[5].markdown(metric_html("All Exp Rows", all_exp_rows), unsafe_allow_html=True)
 
@@ -452,7 +450,7 @@ today_txt = datetime.now().strftime("%A, %B %d, %Y")
 st.markdown(
     f"""
     <div class="header-card">
-        <div style="font-size:26px;font-weight:900;color:white;">{symbol} {today_txt}</div>
+        <div style="font-size:25px;font-weight:900;color:white;">{symbol} {today_txt}</div>
         <div style="font-size:15px;font-weight:800;color:white;margin-top:8px;">
             Spot: <span class="green-text">{spot:.2f}</span>
             &nbsp;&nbsp; | &nbsp;&nbsp;
@@ -471,9 +469,9 @@ st.markdown(
 
 
 # =========================================================
-# CHART + MATRIX LAYOUT
+# CHART + MATRIX
 # =========================================================
-left_chart, right_matrix = st.columns([2.2, 1])
+left_chart, right_matrix = st.columns([3.4, 0.9])
 
 with left_chart:
     fig = go.Figure()
@@ -481,65 +479,86 @@ with left_chart:
     if isinstance(chart_df, pd.DataFrame) and not chart_df.empty:
         x_col = "time" if "time" in chart_df.columns else chart_df.columns[0]
 
-        if "premium_flow" in chart_df.columns:
-            flow_col = "premium_flow"
-        elif "flow" in chart_df.columns:
-            flow_col = "flow"
-        elif "net_flow" in chart_df.columns:
-            flow_col = "net_flow"
-        else:
-            flow_col = None
+        flow_col = None
+        for possible in ["premium_flow", "flow", "net_flow"]:
+            if possible in chart_df.columns:
+                flow_col = possible
+                break
 
-        price_col = "price" if "price" in chart_df.columns else "spot" if "spot" in chart_df.columns else None
+        price_col = None
+        for possible in ["price", "spot"]:
+            if possible in chart_df.columns:
+                price_col = possible
+                break
 
         if flow_col:
-            bullish = chart_df[chart_df[flow_col] > 0]
-            bearish = chart_df[chart_df[flow_col] < 0]
-            neutral = chart_df[chart_df[flow_col] == 0]
+            flow_series = pd.to_numeric(chart_df[flow_col], errors="coerce").fillna(0)
+            x_vals = chart_df[x_col]
+
+            bullish_flow = flow_series.where(flow_series > 0, 0)
+            bearish_flow = flow_series.where(flow_series < 0, 0)
+
+            cumulative_flow = flow_series.cumsum()
+            flow_ma_fast = cumulative_flow.rolling(5, min_periods=1).mean()
+            flow_ma_slow = cumulative_flow.rolling(13, min_periods=1).mean()
 
             fig.add_trace(
                 go.Bar(
-                    x=bullish[x_col],
-                    y=bullish[flow_col],
+                    x=x_vals,
+                    y=bullish_flow,
                     name="Bullish Flow",
-                    marker_color="#28e337",
-                    opacity=0.95,
+                    marker_color="#26ff38",
+                    opacity=0.85,
                 )
             )
 
             fig.add_trace(
                 go.Bar(
-                    x=bearish[x_col],
-                    y=bearish[flow_col],
+                    x=x_vals,
+                    y=bearish_flow,
                     name="Bearish Flow",
                     marker_color="#ff3030",
-                    opacity=0.95,
+                    opacity=0.85,
                 )
             )
 
-            if not neutral.empty:
-                fig.add_trace(
-                    go.Bar(
-                        x=neutral[x_col],
-                        y=neutral[flow_col],
-                        name="Other Flow",
-                        marker_color="#a6adb7",
-                        opacity=0.75,
-                    )
+            fig.add_trace(
+                go.Scatter(
+                    x=x_vals,
+                    y=flow_ma_fast,
+                    name="Fast Flow",
+                    mode="lines",
+                    line=dict(color="#ffe100", width=4, shape="spline"),
                 )
+            )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=x_vals,
+                    y=flow_ma_slow,
+                    name="Slow Flow",
+                    mode="lines",
+                    line=dict(color="#2cff1f", width=4, shape="spline"),
+                )
+            )
 
             if show_flow_dots:
-                dot_df = chart_df[chart_df[flow_col].abs() >= flow_dot_threshold]
+                dot_df = chart_df[flow_series.abs() >= flow_dot_threshold].copy()
                 if not dot_df.empty:
+                    dot_values = pd.to_numeric(dot_df[flow_col], errors="coerce").fillna(0)
+
                     fig.add_trace(
                         go.Scatter(
                             x=dot_df[x_col],
-                            y=dot_df[flow_col],
+                            y=dot_values,
                             mode="markers",
                             name="FLOW X",
                             marker=dict(
                                 size=9,
-                                color=dot_df[flow_col].apply(lambda v: "#28e337" if v > 0 else "#ff3030"),
+                                color=[
+                                    "#26ff38" if v > 0 else "#ff3030"
+                                    for v in dot_values
+                                ],
                                 line=dict(width=1, color="white"),
                             ),
                         )
@@ -548,8 +567,8 @@ with left_chart:
             fig.add_hline(
                 y=flow_dot_threshold,
                 line_dash="dash",
-                line_color="#28e337",
-                annotation_text=f"FLOW Dot Threshold: {flow_dot_threshold:,}",
+                line_color="#26ff38",
+                annotation_text=f"FLOW Dot Threshold",
                 annotation_position="right",
             )
 
@@ -568,25 +587,25 @@ with left_chart:
                     y=chart_df[price_col],
                     name="Price",
                     mode="lines",
-                    line=dict(color="white", width=3),
+                    line=dict(color="white", width=4, shape="spline"),
                     yaxis="y2",
                 )
             )
 
     if call_gamma:
         fig.add_hline(
-            y=flow_dot_threshold * 1.4,
+            y=flow_dot_threshold * 1.05,
             line_dash="dash",
-            line_color="#00ff66",
+            line_color="#26ff38",
             annotation_text=f"Call Gamma {call_gamma:.2f}",
             annotation_position="left",
         )
 
     if put_gamma:
         fig.add_hline(
-            y=-flow_dot_threshold * 0.65,
+            y=-flow_dot_threshold * 0.55,
             line_dash="dash",
-            line_color="#ff3333",
+            line_color="#ff3030",
             annotation_text=f"Put Gamma {put_gamma:.2f}",
             annotation_position="left",
         )
@@ -596,8 +615,8 @@ with left_chart:
         template="plotly_dark",
         paper_bgcolor="#111923",
         plot_bgcolor="#252a2f",
-        height=520,
-        margin=dict(l=40, r=55, t=55, b=45),
+        height=500,
+        margin=dict(l=40, r=55, t=50, b=45),
         barmode="relative",
         legend=dict(
             orientation="h",
@@ -605,20 +624,27 @@ with left_chart:
             y=-0.18,
             xanchor="center",
             x=0.5,
+            font=dict(size=12, color="white"),
         ),
         yaxis=dict(
             title="Premium Flow",
-            gridcolor="rgba(255,255,255,.12)",
+            gridcolor="rgba(255,255,255,.14)",
             zeroline=True,
             zerolinecolor="white",
+            zerolinewidth=2,
+            tickfont=dict(color="#ffdd00"),
         ),
         yaxis2=dict(
             title="Price",
             overlaying="y",
             side="right",
             showgrid=False,
+            tickfont=dict(color="white"),
         ),
-        xaxis=dict(gridcolor="rgba(255,255,255,.10)"),
+        xaxis=dict(
+            gridcolor="rgba(255,255,255,.10)",
+            tickfont=dict(color="white"),
+        ),
     )
 
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
@@ -640,11 +666,6 @@ with right_matrix:
                     lookback_hours=lookback_hours,
                     strike_width=strike_width,
                 )
-            except TypeError:
-                try:
-                    sym_snapshot = snapshot if sym == symbol else get_flow_snapshot(sym)
-                except Exception:
-                    sym_snapshot = {}
             except Exception:
                 sym_snapshot = {}
 
@@ -653,29 +674,28 @@ with right_matrix:
             gamma_value = safe_get(sym_snapshot, "gamma_signal", 0)
             pulse_value = safe_get(sym_snapshot, "pulse_drop_signal", 0)
 
-            flow_status = build_signal_status(
+            flow_status = status_from_value(
                 1 if flow_net >= FLOW_DOT_THRESHOLDS.get(sym, 25_000_000)
                 else -1 if flow_net <= -FLOW_DOT_THRESHOLDS.get(sym, 25_000_000)
                 else 0
             )
 
-            divergence_status = build_signal_status(
+            divergence_status = status_from_value(
                 1 if div_value >= DIVERGENCE_THRESHOLDS.get(sym, 10_000_000)
                 else -1 if div_value <= -DIVERGENCE_THRESHOLDS.get(sym, 10_000_000)
                 else 0
             )
 
-            gamma_status = build_signal_status(gamma_value)
-            pulse_status = build_signal_status(pulse_value)
+            gamma_status = status_from_value(gamma_value)
+            pulse_status = status_from_value(pulse_value)
 
             rows.append(
                 {
                     "Symbol": f"{SYMBOL_ICONS.get(sym, '')} {sym}",
-                    "Flow X": signal_dot(flow_status),
-                    "Divergence": signal_dot(divergence_status),
-                    "Gamma Level": signal_dot(gamma_status),
-                    "Pulse/Drop": signal_dot(pulse_status),
-                    "Status": flow_status,
+                    "Flow": dot_from_status(flow_status),
+                    "Div": dot_from_status(divergence_status),
+                    "Gamma": dot_from_status(gamma_status),
+                    "Pulse": dot_from_status(pulse_status),
                 }
             )
 
@@ -685,7 +705,7 @@ with right_matrix:
             matrix_df,
             use_container_width=True,
             hide_index=True,
-            height=310,
+            height=245,
         )
 
         st.markdown("</div>", unsafe_allow_html=True)
