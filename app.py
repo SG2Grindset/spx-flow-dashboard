@@ -64,9 +64,60 @@ def check_password():
         unsafe_allow_html=True,
     )
 
-    password = st.text_input("Enter Password", type="password")
+st.markdown(
+    """
+    <style>
+    .password-label {
+        color: #ffffff !important;
+        font-size: 18px;
+        font-weight: 900;
+        margin-bottom: 8px;
+        margin-top: 20px;
+    }
 
-    if st.button("Login", use_container_width=True):
+    div[data-testid="stTextInput"] input {
+        background-color: #ffffff !important;
+        color: #111111 !important;
+        font-weight: 800 !important;
+        border-radius: 10px !important;
+        border: 2px solid #00d46a !important;
+        height: 52px !important;
+        font-size: 18px !important;
+    }
+
+    div[data-testid="stButton"] button {
+        background: linear-gradient(180deg, #00d46a, #00994d) !important;
+        color: #ffffff !important;
+        font-weight: 900 !important;
+        font-size: 18px !important;
+        border-radius: 12px !important;
+        border: 1px solid #00ff88 !important;
+        height: 56px !important;
+        box-shadow: 0 0 18px rgba(0,212,106,.45) !important;
+        transition: all .2s ease-in-out;
+    }
+
+    div[data-testid="stButton"] button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 0 28px rgba(0,255,136,.65) !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    '<div class="password-label">Enter Password</div>',
+    unsafe_allow_html=True,
+)
+
+password = st.text_input(
+    "",
+    type="password",
+    label_visibility="collapsed",
+)
+
+if st.button("ENTER THE FLOW by SG2", use_container_width=True):
         try:
             correct_password = st.secrets["APP_PASSWORD"]
         except Exception:
