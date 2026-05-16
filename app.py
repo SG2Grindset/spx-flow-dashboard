@@ -269,10 +269,7 @@ symbol_cols = st.columns(len(SYMBOLS))
 for idx, sym in enumerate(SYMBOLS):
     label = SYMBOL_BUTTONS.get(sym, sym)
 
-    with symbol_cols[idx]:
-        if st.button(label, key=f"symbol_button_{sym}"):
-            st.session_state.selected_symbol = sym
-            st.rerun()
+    
 
 st.markdown(
     f'<div class="sg2-active-symbol">ACTIVE: {SYMBOL_BUTTONS.get(symbol, symbol)}</div>',
