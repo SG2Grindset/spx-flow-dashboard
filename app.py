@@ -137,10 +137,11 @@ if not check_password():
 # =========================================================
 # SYMBOL CONFIG
 # =========================================================
-SYMBOLS = ["SPX", "SPY", "QQQ", "TSLA", "AAPL"]
+SYMBOLS = ["SPX", "XSP", "SPY", "QQQ", "TSLA", "AAPL"]
 
 SYMBOL_ICONS = {
     "SPX": "📈",
+    "XSP": "🧩",
     "SPY": "🕷️",
     "QQQ": "📊",
     "TSLA": "⚡",
@@ -149,6 +150,7 @@ SYMBOL_ICONS = {
 
 FLOW_DOT_THRESHOLDS = {
     "SPX": 100_000_000,
+    "XSP": 10_000_000,
     "SPY": 25_000_000,
     "QQQ": 25_000_000,
     "TSLA": 75_000_000,
@@ -157,6 +159,7 @@ FLOW_DOT_THRESHOLDS = {
 
 DIVERGENCE_THRESHOLDS = {
     "SPX": 30_000_000,
+    "XSP": 3_000_000,
     "SPY": 10_000_000,
     "QQQ": 10_000_000,
     "TSLA": 20_000_000,
@@ -165,6 +168,7 @@ DIVERGENCE_THRESHOLDS = {
 
 PULSE_DROP_THRESHOLDS = {
     "SPX": 100_000_000,
+    "XSP": 10_000_000,
     "SPY": 25_000_000,
     "QQQ": 25_000_000,
     "TSLA": 75_000_000,
