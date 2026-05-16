@@ -162,11 +162,79 @@ section[data-testid="stSidebar"] {
     padding: 5px 0;
 }
 
+
+/* ============================================================
+   SG2 SYMBOL BUTTON BAR
+   ============================================================ */
+
+.sg2-symbol-label {
+    color: #facc15;
+    font-size: 15px;
+    font-weight: 900;
+    margin-top: 4px;
+    margin-bottom: 6px;
+    letter-spacing: 0.8px;
+}
+
+div[data-testid="stButton"] > button {
+    background: linear-gradient(145deg,#111827,#020617) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(250,204,21,0.35) !important;
+    border-radius: 16px !important;
+    padding: 0.75rem 1rem !important;
+    font-size: 18px !important;
+    font-weight: 900 !important;
+    width: 100% !important;
+    min-height: 54px !important;
+    box-shadow: 0 0 16px rgba(0,0,0,0.45) !important;
+}
+
+div[data-testid="stButton"] > button:hover {
+    border: 1px solid rgba(34,197,94,0.85) !important;
+    box-shadow: 0 0 20px rgba(34,197,94,0.30) !important;
+    transform: translateY(-1px);
+}
+
+.sg2-active-symbol {
+    background: linear-gradient(145deg,#064e3b,#052e16);
+    color: #ffffff;
+    border: 1px solid rgba(34,197,94,0.90);
+    border-radius: 16px;
+    padding: 12px 16px;
+    text-align: center;
+    font-size: 22px;
+    font-weight: 900;
+    box-shadow: 0 0 22px rgba(34,197,94,0.35);
+    margin-bottom: 12px;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🟢 SG2 Flow AI Dashboard")
 st.caption("Premium Flow Chart + SG2 Flow Matrix + Signal Log for SPY / SPX / QQQ / TSLA. Timeline shown in Central Time.")
+
+# ============================================================
+# TOP SYMBOL BUTTON BAR
+# ============================================================
+
+st.markdown('<div class="sg2-symbol-label">SELECT SYMBOL</div>', unsafe_allow_html=True)
+
+symbol_cols = st.columns(len(SYMBOLS))
+
+for idx, sym in enumerate(SYMBOLS):
+    label = SYMBOL_BUTTONS.get(sym, sym)
+
+    with symbol_cols[idx]:
+        if st.button(label, key=f"symbol_button_{sym}"):
+            st.session_state.selected_symbol = sym
+            st.rerun()
+
+st.markdown(
+    f'<div class="sg2-active-symbol">ACTIVE: {SYMBOL_BUTTONS.get(symbol, symbol)}</div>',
+    unsafe_allow_html=True,
+)
+
 
 
 # ============================================================
@@ -175,11 +243,19 @@ st.caption("Premium Flow Chart + SG2 Flow Matrix + Signal Log for SPY / SPX / QQ
 
 SYMBOLS = ["SPY", "SPX", "QQQ", "TSLA"]
 
-symbol = st.sidebar.selectbox(
-    "Symbol",
-    SYMBOLS,
-    index=0,
-)
+SYMBOL_BUTTONS = {
+    "SPY": "🕷️ SPY",
+    "SPX": "📈 SPX",
+    "QQQ": "💻 QQQ",
+    "TSLA": "⚡ TSLA",
+}
+
+if "selected_symbol" not in st.session_state:
+    st.session_state.selected_symbol = "SPY"
+
+symbol = st.session_state.selected_symbol
+
+st.sidebar.caption("Symbol selector moved to top buttons.")
 
 auto_refresh = st.sidebar.checkbox("Auto Refresh", value=True)
 
