@@ -248,6 +248,59 @@ section[data-testid="stSidebar"] .stSlider div {
 hr {
     border-color: #263241;
 }
+
+/* =========================================================
+FINAL SIDEBAR VISIBILITY OVERRIDES
+========================================================= */
+
+/* Main visible values */
+section[data-testid="stSidebar"] [data-baseweb="select"] div,
+section[data-testid="stSidebar"] [data-baseweb="select"] span,
+section[data-testid="stSidebar"] [data-baseweb="input"] div,
+section[data-testid="stSidebar"] [data-baseweb="input"] input {
+    color: #111111 !important;
+    -webkit-text-fill-color: #111111 !important;
+    opacity: 1 !important;
+    font-weight: 900 !important;
+}
+
+/* Dropdown arrows */
+section[data-testid="stSidebar"] [data-baseweb="select"] svg {
+    fill: #111111 !important;
+    color: #111111 !important;
+}
+
+/* White widget backgrounds */
+section[data-testid="stSidebar"] [data-baseweb="select"],
+section[data-testid="stSidebar"] [data-baseweb="input"] {
+    background-color: #ffffff !important;
+}
+
+/* Selectbox displayed text */
+section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] * {
+    color: #111111 !important;
+    -webkit-text-fill-color: #111111 !important;
+    font-weight: 900 !important;
+}
+
+/* Number input visible values */
+section[data-testid="stSidebar"] .stNumberInput input {
+    color: #111111 !important;
+    -webkit-text-fill-color: #111111 !important;
+    font-weight: 900 !important;
+}
+
+/* Force slider labels visible */
+section[data-testid="stSidebar"] .stSlider label,
+section[data-testid="stSidebar"] .stSlider span {
+    color: #ffffff !important;
+}
+
+/* Selected dropdown text */
+section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+    color: #111111 !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
