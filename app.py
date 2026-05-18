@@ -1367,7 +1367,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             xanchor="left",
             font=dict(size=20, color="white"),
         ),
-        height=620,
+        height=540,
         paper_bgcolor="#111923",
         plot_bgcolor="#252a2f",
         font=dict(color="white", size=13),
@@ -1407,7 +1407,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
         legend=dict(
             orientation="h",
             x=0.01,
-            y=-0.18,
+            y=-0.24,
             bgcolor="rgba(0,0,0,0.25)",
             font=dict(color="white", size=12, family="Arial Black"),
         ),
@@ -1662,7 +1662,7 @@ st.markdown(header_html, unsafe_allow_html=True)
 # =========================================================
 # CHART + MATRIX
 # =========================================================
-left_chart, right_matrix = st.columns([3.5, 1.2])
+left_chart, right_matrix = st.columns([2.7, 1.5])
 
 
 # =========================================================
