@@ -858,7 +858,7 @@ st.markdown(header_html, unsafe_allow_html=True)
 # =========================================================
 # CHART + MATRIX
 # =========================================================
-left_chart, right_matrix = st.columns([4.2, 0.8])
+left_chart, right_matrix = st.columns([3.5, 1.2])
 
 
 # =========================================================
