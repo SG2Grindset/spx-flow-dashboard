@@ -2,6 +2,9 @@ import os
 import time
 from pathlib import Path
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+CENTRAL_TZ = ZoneInfo("America/Chicago")
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -934,7 +937,7 @@ def reset_symbol_history(symbol):
 def append_exp_snapshot(flow_data):
     file_path = session_file(flow_data["symbol"])
 
-    now = datetime.now()
+    now = datetime.now(CENTRAL_TZ)
 
     row = {
         "datetime": now.strftime("%Y-%m-%d %H:%M:%S"),
@@ -1055,7 +1058,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
         fig = go.Figure()
         fig.update_layout(
             title=f"No flow history yet for {symbol}",
-            height=620,
+            height=560,
             paper_bgcolor="#111923",
             plot_bgcolor="#252a2f",
             font=dict(color="white"),
@@ -1630,7 +1633,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 # =========================================================
 # HEADER
 # =========================================================
-today_txt = datetime.now().strftime("%A, %B %d, %Y")
+today_txt = datetime.now(CENTRAL_TZ).strftime("%A, %B %d, %Y")
 
 header_html = f"""
 <div class="header-card">
