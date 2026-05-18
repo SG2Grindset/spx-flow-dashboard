@@ -810,7 +810,7 @@ def calculate_net_flow(chain_df):
     }
 
 
-def get_gamma_levels(chain_df):
+def get_gamma_levels(chain_df, spot):
     if chain_df is None or chain_df.empty:
         return {
             "top_call_gamma": None,
@@ -827,11 +827,21 @@ def get_gamma_levels(chain_df):
 
     df["gamma"] = pd.to_numeric(df["gamma"], errors="coerce").fillna(0)
     df["open_interest"] = pd.to_numeric(df["open_interest"], errors="coerce").fillna(0)
+    df["strike"] = pd.to_numeric(df["strike"], errors="coerce").fillna(0)
 
     df["gamma_exposure"] = df["gamma"] * df["open_interest"] * 100
 
-    calls = df[df["type"] == "call"].copy()
-    puts = df[df["type"] == "put"].copy()
+    spot = float(spot)
+
+    calls = df[
+        (df["type"] == "call")
+        & (df["strike"] >= spot)
+    ].copy()
+
+    puts = df[
+        (df["type"] == "put")
+        & (df["strike"] <= spot)
+    ].copy()
 
     call_gamma = (
         calls.groupby("strike")["gamma_exposure"]
@@ -891,7 +901,7 @@ def load_expiration_flow(symbol):
 
     zero_flow = calculate_net_flow(zero_dte_chain)
     all_flow = calculate_net_flow(all_chain)
-    gamma_levels = get_gamma_levels(all_chain)
+    gamma_levels = get_gamma_levels(all_chain, spot)
 
     return {
         "symbol": symbol,
