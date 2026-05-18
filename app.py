@@ -699,7 +699,7 @@ if symbol not in st.session_state.flow_history:
 
 new_row = pd.DataFrame(
     [{
-        "time": pd.Timestamp.now(),
+        "time": pd.Timestamp.now(tz="America/Chicago"),
         "odte_flow": odte_premium_net,
         "all_exp_flow": all_exp_premium_net,
         "signed_delta": odte_signed_delta,
@@ -712,11 +712,13 @@ st.session_state.flow_history[symbol] = pd.concat(
     ignore_index=True,
 )
 
-cutoff = pd.Timestamp.now() - pd.Timedelta(hours=lookback_hours)
+cutoff = pd.Timestamp.now(tz="America/Chicago") - pd.Timedelta(hours=lookback_hours)
 
 history_df = st.session_state.flow_history[symbol].copy()
-history_df["time"] = pd.to_datetime(history_df["time"])
+history_df["time"] = pd.to_datetime(history_df["time"], errors="coerce")
+history_df = history_df.dropna(subset=["time"])
 history_df = history_df[history_df["time"] >= cutoff]
+history_df = history_df.sort_values("time")
 
 st.session_state.flow_history[symbol] = history_df
 
@@ -886,6 +888,8 @@ with left_chart:
             errors="coerce",
         ).fillna(0)
 
+        history_df = history_df.sort_values("time")
+
         fig.add_trace(
             go.Scatter(
                 x=history_df["time"],
@@ -1053,8 +1057,8 @@ with left_chart:
             tickfont=dict(color="white"),
         ),
         xaxis=dict(
-            tickformat="%H:%M",
-            dtick=180000,
+            tickformat="%I:%M %p",
+            dtick=chart_bucket * 60000,
             gridcolor="rgba(255,255,255,.10)",
             tickfont=dict(color="white"),
         ),
