@@ -868,17 +868,17 @@ with left_chart:
     fig = go.Figure()
 
     if not history_df.empty:
-        history_df["odte_flow"] = pd.to_numeric(
+        history_df["odte_flow_raw"] = pd.to_numeric(
             history_df["odte_flow"],
             errors="coerce",
         ).fillna(0)
 
-        history_df["all_exp_flow"] = pd.to_numeric(
+        history_df["all_exp_flow_raw"] = pd.to_numeric(
             history_df["all_exp_flow"],
             errors="coerce",
         ).fillna(0)
 
-        history_df["signed_delta"] = pd.to_numeric(
+        history_df["signed_delta_raw"] = pd.to_numeric(
             history_df["signed_delta"],
             errors="coerce",
         ).fillna(0)
@@ -890,10 +890,32 @@ with left_chart:
 
         history_df = history_df.sort_values("time")
 
+        # Discord-style cumulative flow separation
+        history_df["odte_flow_plot"] = (
+            history_df["odte_flow_raw"]
+            .diff()
+            .fillna(0)
+            .cumsum()
+        )
+
+        history_df["all_exp_flow_plot"] = (
+            history_df["all_exp_flow_raw"]
+            .diff()
+            .fillna(0)
+            .cumsum()
+        )
+
+        history_df["signed_delta_plot"] = (
+            history_df["signed_delta_raw"]
+            .diff()
+            .fillna(0)
+            .cumsum()
+        )
+
         fig.add_trace(
             go.Scatter(
                 x=history_df["time"],
-                y=history_df["odte_flow"],
+                y=history_df["odte_flow_plot"],
                 name="0DTE Flow",
                 mode="lines",
                 line=dict(color="#2cff1f", width=4, shape="spline"),
@@ -903,7 +925,7 @@ with left_chart:
         fig.add_trace(
             go.Scatter(
                 x=history_df["time"],
-                y=history_df["all_exp_flow"],
+                y=history_df["all_exp_flow_plot"],
                 name="All Exp Flow",
                 mode="lines",
                 line=dict(color="#ffe100", width=4, shape="spline"),
@@ -914,7 +936,7 @@ with left_chart:
             fig.add_trace(
                 go.Scatter(
                     x=history_df["time"],
-                    y=history_df["signed_delta"],
+                    y=history_df["signed_delta_plot"],
                     name="Signed Delta",
                     mode="lines",
                     line=dict(
@@ -940,14 +962,14 @@ with left_chart:
 
         if show_flow_dots:
             dot_df = history_df[
-                history_df["odte_flow"].abs() >= flow_dot_threshold
+                history_df["odte_flow_plot"].abs() >= flow_dot_threshold
             ].copy()
 
             if not dot_df.empty:
                 fig.add_trace(
                     go.Scatter(
                         x=dot_df["time"],
-                        y=dot_df["odte_flow"],
+                        y=dot_df["odte_flow_plot"],
                         mode="markers+text",
                         name="FLOW X",
                         text=["FLOW"] * len(dot_df),
@@ -958,7 +980,7 @@ with left_chart:
                             symbol="diamond",
                             color=[
                                 "#26ff38" if v > 0 else "#ff3030"
-                                for v in dot_df["odte_flow"]
+                                for v in dot_df["odte_flow_plot"]
                             ],
                             line=dict(width=1, color="white"),
                         ),
@@ -967,8 +989,8 @@ with left_chart:
 
         if show_right_labels and len(history_df) > 0:
             latest_time = history_df["time"].iloc[-1]
-            latest_odte = history_df["odte_flow"].iloc[-1]
-            latest_all = history_df["all_exp_flow"].iloc[-1]
+            latest_odte = history_df["odte_flow_plot"].iloc[-1]
+            latest_all = history_df["all_exp_flow_plot"].iloc[-1]
             latest_price = history_df["price"].iloc[-1]
 
             add_right_edge_label(
@@ -990,7 +1012,7 @@ with left_chart:
             )
 
             if show_signed_delta_line:
-                latest_signed = history_df["signed_delta"].iloc[-1]
+                latest_signed = history_df["signed_delta_plot"].iloc[-1]
 
                 add_right_edge_label(
                     fig,
@@ -1048,6 +1070,7 @@ with left_chart:
             zerolinecolor="white",
             zerolinewidth=2,
             tickfont=dict(color="#ffdd00"),
+            tickformat="~s",
         ),
         yaxis2=dict(
             title="Price",
