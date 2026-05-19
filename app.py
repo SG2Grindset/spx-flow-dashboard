@@ -189,6 +189,15 @@ CHAIN_WIDTH_DEFAULTS = {
     "QQQ": 100,
 }
 
+# Number of strikes to keep on each side of spot.
+# SPY/QQQ = 5 strikes above + 5 strikes below.
+# SPX = 25 strikes above + 25 strikes below.
+STRIKE_COUNT_DEFAULTS = {
+    "SPY": 5,
+    "QQQ": 5,
+    "SPX": 25,
+}
+
 
 # =========================================================
 # SESSION STATE
@@ -446,12 +455,11 @@ with st.sidebar:
         key=f"pulse_drop_threshold_{symbol}",
     )
 
-    chain_width = st.slider(
-        "Strike Width Around Spot",
-        min_value=25,
-        max_value=1000,
-        value=CHAIN_WIDTH_DEFAULTS.get(symbol, 100),
-        step=25,
+    strike_count_each_side = STRIKE_COUNT_DEFAULTS.get(symbol, 5)
+
+    st.caption(
+        f"Strike Filter: {strike_count_each_side} strikes above and "
+        f"{strike_count_each_side} strikes below spot for {symbol}"
     )
 
     reset_exp_history = st.button("Reset Flow Chart History")
@@ -751,11 +759,44 @@ def get_option_chain(symbol, expiration):
     return df
 
 
-def filter_near_spot(df, spot, width):
-    return df[
-        (df["strike"] >= float(spot) - width)
-        & (df["strike"] <= float(spot) + width)
-    ].copy()
+def filter_near_spot(df, spot, strikes_each_side):
+    """
+    Keep only a fixed number of option strikes above and below spot.
+
+    SPY / QQQ: 5 above + 5 below
+    SPX: 25 above + 25 below
+
+    This is different from a dollar-width filter. It counts actual listed strikes.
+    """
+    if df is None or df.empty or "strike" not in df.columns:
+        return pd.DataFrame()
+
+    temp = df.copy()
+    temp["strike"] = pd.to_numeric(temp["strike"], errors="coerce")
+    temp = temp.dropna(subset=["strike"])
+
+    if temp.empty:
+        return temp
+
+    spot = float(spot)
+    strikes_each_side = int(strikes_each_side)
+
+    strikes = sorted(temp["strike"].dropna().unique())
+
+    if not strikes:
+        return temp.iloc[0:0].copy()
+
+    atm_idx = min(
+        range(len(strikes)),
+        key=lambda i: abs(strikes[i] - spot),
+    )
+
+    start_idx = max(0, atm_idx - strikes_each_side)
+    end_idx = min(len(strikes), atm_idx + strikes_each_side + 1)
+
+    selected_strikes = set(strikes[start_idx:end_idx])
+
+    return temp[temp["strike"].isin(selected_strikes)].copy()
 
 
 def calculate_net_flow(chain_df):
@@ -872,7 +913,7 @@ def load_expiration_flow(symbol):
         zero_dte_chain = filter_near_spot(
             zero_dte_chain,
             spot,
-            chain_width,
+            strike_count_each_side,
         )
 
     for exp in selected_expirations:
@@ -887,7 +928,7 @@ def load_expiration_flow(symbol):
         all_chain = filter_near_spot(
             all_chain,
             spot,
-            chain_width,
+            strike_count_each_side,
         )
     else:
         all_chain = pd.DataFrame()
@@ -1099,7 +1140,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
                 all_exp_count=all_exp_count,
                 chart_bucket=chart_bucket,
                 lookback_hours=lookback_hours,
-                strike_width=chain_width,
+                strike_width=CHAIN_WIDTH_DEFAULTS.get(symbol, 100),
             )
             signed_delta_value = safe_get(signed_snapshot, "odte_signed_delta", 0)
             df["signed_delta"] = float(signed_delta_value)
@@ -1461,7 +1502,7 @@ try:
         all_exp_count=all_exp_count,
         chart_bucket=chart_bucket,
         lookback_hours=lookback_hours,
-        strike_width=chain_width,
+        strike_width=CHAIN_WIDTH_DEFAULTS.get(symbol, 100),
     )
 except Exception as e:
     st.warning(f"Could not load SG² metric snapshot for {symbol}: {e}")
@@ -1694,7 +1735,7 @@ with right_matrix:
                         all_exp_count=all_exp_count,
                         chart_bucket=chart_bucket,
                         lookback_hours=lookback_hours,
-                        strike_width=chain_width,
+                        strike_width=CHAIN_WIDTH_DEFAULTS.get(sym, 100),
                     )
                 )
             except Exception as e:
