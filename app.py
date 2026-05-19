@@ -424,6 +424,15 @@ with st.sidebar:
     show_daily_levels = st.checkbox("Show Daily Supply/Demand", value=False)
     show_weekly_levels = st.checkbox("Show Weekly Levels", value=False)
     show_level_labels = st.checkbox("Show Level Labels", value=True)
+    keep_price_scale_tight = st.checkbox("Keep Price Scale Tight", value=True)
+    level_scale_distance_pct = st.slider(
+        "Level Scale Distance %",
+        min_value=0.5,
+        max_value=5.0,
+        value=1.5,
+        step=0.25,
+        help="Only levels within this percent of spot are allowed to expand the right-side price scale.",
+    )
 
     st.caption("Leave a level at 0 to hide it. Call/Put walls are calculated from option-chain gamma.")
 
@@ -1483,6 +1492,33 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     for gamma_key in ["top_call_gamma", "top_put_gamma"]:
         extra_price_levels.append(gamma_levels.get(gamma_key))
 
+    # ================================
+    # RIGHT PRICE SCALE FIX
+    # ================================
+    # Keep the right axis based on real price data only.
+    # Dealer / supply / demand levels can be far away; if every level is allowed
+    # to expand y2, SPY/SPX/QQQ price becomes compressed and tick labels stack.
+    spot_reference = None
+    try:
+        spot_reference = float(flow_data.get("spot", 0))
+    except Exception:
+        spot_reference = None
+
+    positive_spots = pd.to_numeric(df.get("spot", pd.Series(dtype=float)), errors="coerce")
+    positive_spots = positive_spots[positive_spots > 0]
+
+    if not positive_spots.empty:
+        price_min = float(positive_spots.min())
+        price_max = float(positive_spots.max())
+        if spot_reference is None or spot_reference <= 0:
+            spot_reference = float(positive_spots.iloc[-1])
+    elif spot_reference and spot_reference > 0:
+        price_min = spot_reference
+        price_max = spot_reference
+    else:
+        price_min = 0.0
+        price_max = 1.0
+
     manual_levels = flow_data.get("manual_levels", {}) or {}
     extra_price_levels.extend(manual_levels.values())
 
@@ -1490,38 +1526,60 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     extra_price_levels.extend(oi_levels.get("top_call_oi", []))
     extra_price_levels.extend(oi_levels.get("top_put_oi", []))
 
+    # Only nearby levels expand the price axis. Distant lines may still exist,
+    # but they will not destroy the chart scale.
+    max_level_distance = float(level_scale_distance_pct) / 100.0
+
     for level in extra_price_levels:
         try:
             level = float(level)
-            if level > 0:
-                price_min = min(price_min, level)
-                price_max = max(price_max, level)
+            if level <= 0:
+                continue
+
+            if keep_price_scale_tight and spot_reference and spot_reference > 0:
+                distance_pct = abs(level - spot_reference) / spot_reference
+                if distance_pct > max_level_distance:
+                    continue
+
+            price_min = min(price_min, level)
+            price_max = max(price_max, level)
         except Exception:
             pass
 
     price_span = price_max - price_min
 
-    if price_span <= 0:
-        if symbol.upper() == "SPX":
-            price_span = 10
-        elif symbol.upper() == "TSLA":
-            price_span = 5
-        elif symbol.upper() == "QQQ":
-            price_span = 1
-        else:
-            price_span = 0.75
+    # Minimum visible price span keeps the white price line readable even when
+    # there is only one snapshot in history.
+    if symbol.upper() == "SPX":
+        min_price_span = 12
+    else:
+        min_price_span = 2.0
 
-    price_pad = price_span * 0.35
+    if price_span < min_price_span:
+        center = spot_reference if spot_reference and spot_reference > 0 else (price_min + price_max) / 2
+        price_min = center - (min_price_span / 2)
+        price_max = center + (min_price_span / 2)
+        price_span = min_price_span
+
+    price_pad = price_span * 0.08
     price_range = [price_min - price_pad, price_max + price_pad]
 
+    # Use sane tick spacing. Fixed 0.50 ticks over a large range causes the
+    # stacked-label look seen on the right side of the chart.
     if symbol.upper() == "SPX":
-        price_dtick = 5
-    elif symbol.upper() == "TSLA":
-        price_dtick = 2.5
-    elif symbol.upper() in ["SPY", "QQQ"]:
-        price_dtick = 0.5
+        if price_span <= 25:
+            price_dtick = 5
+        elif price_span <= 75:
+            price_dtick = 10
+        else:
+            price_dtick = 25
     else:
-        price_dtick = 1
+        if price_span <= 5:
+            price_dtick = 0.5
+        elif price_span <= 15:
+            price_dtick = 1
+        else:
+            price_dtick = 2.5
 
     fig.update_layout(
         title=dict(
