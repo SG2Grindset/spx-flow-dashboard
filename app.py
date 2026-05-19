@@ -1331,18 +1331,18 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     # Fallback when price is flat or only one print exists.
     if price_span <= 0:
         if symbol.upper() == "SPX":
-            price_span = 8
+            price_span = 25
         elif symbol.upper() == "QQQ":
-            price_span = 2
+            price_span = 6
         else:  # SPY
-            price_span = 1.5
+            price_span = 5
 
         center = float(latest_spot) if latest_spot else (price_min + price_max) / 2
         price_min = center - price_span / 2
         price_max = center + price_span / 2
 
     # Tight padding: enough breathing room without wasting chart space.
-    price_pad = price_span * 0.10
+    price_pad = price_span * 0.25
     price_range = [price_min - price_pad, price_max + price_pad]
 
     # Better tick spacing by symbol.
