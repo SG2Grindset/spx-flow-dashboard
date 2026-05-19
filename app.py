@@ -16,6 +16,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from dotenv import load_dotenv
 from streamlit_autorefresh import st_autorefresh
 
@@ -1560,10 +1561,10 @@ with left_chart:
 with right_matrix:
     matrix_html = build_matrix_html(matrix_data)
 
-st.components.v1.html(
-    matrix_html,
-    height=420,
-    scrolling=False,
-)
+    components.html(
+        matrix_html,
+        height=430,
+        scrolling=False,
+    )
 
 st.caption("All values are real-time estimates. Not financial advice. Data may be delayed.")
