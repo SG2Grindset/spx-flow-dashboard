@@ -1319,20 +1319,57 @@ def sg2_flow_chart(history_df, symbol, flow_data):
         except Exception:
             pass
 
-    price_span = price_max - price_min
+    # === TIGHTER PRICE SCALING ===
 
-    if price_span <= 0:
-        if symbol.upper() == "SPX":
-            price_span = 10
-        elif symbol.upper() == "TSLA":
-            price_span = 5
-        elif symbol.upper() == "QQQ":
-            price_span = 1
-        else:
-            price_span = 0.75
+price_min = min(
+df["spot"].min(),
+call_gamma_level if call_gamma_level else df["spot"].min(),
+put_gamma_level if put_gamma_level else df["spot"].min(),
+)
 
-    price_pad = price_span * 0.35
-    price_range = [price_min - price_pad, price_max + price_pad]
+price_max = max(
+df["spot"].max(),
+call_gamma_level if call_gamma_level else df["spot"].max(),
+put_gamma_level if put_gamma_level else df["spot"].max(),
+)
+
+price_span = price_max - price_min
+
+# fallback if levels are identical
+
+if price_span <= 0:
+
+```
+if symbol.upper() == "SPX":
+    price_span = 8
+
+elif symbol.upper() == "QQQ":
+    price_span = 2
+
+else:  # SPY
+    price_span = 1.5
+```
+
+# MUCH tighter padding
+
+price_pad = price_span * 0.10
+
+price_range = [
+price_min - price_pad,
+price_max + price_pad,
+]
+
+# better tick spacing
+
+if symbol.upper() == "SPX":
+price_dtick = 2.5
+
+elif symbol.upper() in ["SPY", "QQQ"]:
+price_dtick = 0.5
+
+else:
+price_dtick = 1
+
 
     if symbol.upper() == "SPX":
         price_dtick = 5
