@@ -416,72 +416,6 @@ with st.sidebar:
     show_signed_delta_line = st.checkbox("Show Signed Delta Line", value=False)
     show_right_labels = st.checkbox("Show Right Edge Labels", value=True)
 
-    st.markdown("---")
-    st.markdown("### 🧭 Dealer / Structure Levels")
-
-    show_primary_dealer_levels = st.checkbox("Show Primary Dealer Levels", value=True)
-    show_oi_levels = st.checkbox("Show OI Levels", value=False)
-    show_daily_levels = st.checkbox("Show Daily Supply/Demand", value=False)
-    show_weekly_levels = st.checkbox("Show Weekly Levels", value=False)
-    show_level_labels = st.checkbox("Show Level Labels", value=True)
-    keep_price_scale_tight = st.checkbox("Keep Price Scale Tight", value=True)
-    level_scale_distance_pct = st.slider(
-        "Level Scale Distance %",
-        min_value=0.5,
-        max_value=5.0,
-        value=1.5,
-        step=0.25,
-        help="Only levels within this percent of spot are allowed to expand the right-side price scale.",
-    )
-
-    st.caption("Leave a level at 0 to hide it. Call/Put walls are calculated from option-chain gamma.")
-
-    gamma_flip_level = st.number_input(
-        "Gamma Flip",
-        min_value=0.0,
-        value=0.0,
-        step=0.5,
-        format="%.2f",
-        key=f"gamma_flip_level_{symbol}",
-    )
-
-    volatility_trigger_level = st.number_input(
-        "Volatility Trigger",
-        min_value=0.0,
-        value=0.0,
-        step=0.5,
-        format="%.2f",
-        key=f"volatility_trigger_level_{symbol}",
-    )
-
-    with st.expander("Daily Supply / Demand Inputs", expanded=False):
-        daily_supply_level = st.number_input(
-            "Daily Supply", min_value=0.0, value=0.0, step=0.5, format="%.2f",
-            key=f"daily_supply_level_{symbol}"
-        )
-        daily_mid_level = st.number_input(
-            "Daily Mid", min_value=0.0, value=0.0, step=0.5, format="%.2f",
-            key=f"daily_mid_level_{symbol}"
-        )
-        daily_demand_level = st.number_input(
-            "Daily Demand", min_value=0.0, value=0.0, step=0.5, format="%.2f",
-            key=f"daily_demand_level_{symbol}"
-        )
-
-    with st.expander("Weekly Supply / Demand Inputs", expanded=False):
-        weekly_supply_level = st.number_input(
-            "Weekly Supply", min_value=0.0, value=0.0, step=0.5, format="%.2f",
-            key=f"weekly_supply_level_{symbol}"
-        )
-        weekly_mid_level = st.number_input(
-            "Weekly Mid", min_value=0.0, value=0.0, step=0.5, format="%.2f",
-            key=f"weekly_mid_level_{symbol}"
-        )
-        weekly_demand_level = st.number_input(
-            "Weekly Demand", min_value=0.0, value=0.0, step=0.5, format="%.2f",
-            key=f"weekly_demand_level_{symbol}"
-        )
-
     default_flow_dot_threshold = FLOW_DOT_THRESHOLDS.get(symbol, 25_000_000)
 
     flow_dot_threshold = st.number_input(
@@ -923,59 +857,6 @@ def get_gamma_levels(chain_df, spot):
     }
 
 
-
-
-def get_top_oi_levels(chain_df, spot, top_n=2):
-    if chain_df is None or chain_df.empty:
-        return {"top_call_oi": [], "top_put_oi": []}
-
-    df = chain_df.copy()
-
-    if "open_interest" not in df.columns or "strike" not in df.columns or "type" not in df.columns:
-        return {"top_call_oi": [], "top_put_oi": []}
-
-    df["open_interest"] = pd.to_numeric(df["open_interest"], errors="coerce").fillna(0)
-    df["strike"] = pd.to_numeric(df["strike"], errors="coerce").fillna(0)
-    df = df[df["open_interest"] > 0]
-
-    spot = float(spot)
-
-    calls = df[(df["type"] == "call") & (df["strike"] >= spot)].copy()
-    puts = df[(df["type"] == "put") & (df["strike"] <= spot)].copy()
-
-    call_oi = (
-        calls.groupby("strike")["open_interest"]
-        .sum()
-        .sort_values(ascending=False)
-        .head(top_n)
-    )
-
-    put_oi = (
-        puts.groupby("strike")["open_interest"]
-        .sum()
-        .sort_values(ascending=False)
-        .head(top_n)
-    )
-
-    return {
-        "top_call_oi": [float(x) for x in call_oi.index.tolist()],
-        "top_put_oi": [float(x) for x in put_oi.index.tolist()],
-    }
-
-
-def build_manual_levels():
-    return {
-        "gamma_flip": gamma_flip_level,
-        "volatility_trigger": volatility_trigger_level,
-        "daily_supply": daily_supply_level,
-        "daily_mid": daily_mid_level,
-        "daily_demand": daily_demand_level,
-        "weekly_supply": weekly_supply_level,
-        "weekly_mid": weekly_mid_level,
-        "weekly_demand": weekly_demand_level,
-    }
-
-
 def load_expiration_flow(symbol):
     spot = get_price(symbol)
     expirations = get_expirations(symbol)
@@ -1014,7 +895,6 @@ def load_expiration_flow(symbol):
     zero_flow = calculate_net_flow(zero_dte_chain)
     all_flow = calculate_net_flow(all_chain)
     gamma_levels = get_gamma_levels(all_chain, spot)
-    oi_levels = get_top_oi_levels(all_chain, spot, top_n=2)
 
     return {
         "symbol": symbol,
@@ -1024,8 +904,6 @@ def load_expiration_flow(symbol):
         "zero_dte": zero_flow,
         "all_exp": all_flow,
         "gamma_levels": gamma_levels,
-        "oi_levels": oi_levels,
-        "manual_levels": build_manual_levels(),
     }
 
 
@@ -1160,54 +1038,6 @@ def add_right_edge_label(fig, x, y, text, bg, yref="y", xshift=10):
     )
 
 
-
-
-def valid_level(value):
-    try:
-        value = float(value)
-        return value if value > 0 else None
-    except Exception:
-        return None
-
-
-def add_price_level(fig, value, label, color, dash="dash", width=2, position="top left"):
-    level = valid_level(value)
-    if level is None:
-        return
-
-    fig.add_hline(
-        y=level,
-        line=dict(color=color, width=width, dash=dash),
-        yref="y2",
-        annotation_text=f"{label} {fmt_price(level)}" if show_level_labels else None,
-        annotation_position=position,
-        annotation_font=dict(color=color, size=12, family="Arial Black"),
-        annotation_bgcolor="rgba(0,0,0,0.70)",
-    )
-
-
-def add_price_zone(fig, upper, lower, label, color):
-    upper = valid_level(upper)
-    lower = valid_level(lower)
-    if upper is None or lower is None:
-        return
-
-    lo = min(upper, lower)
-    hi = max(upper, lower)
-
-    fig.add_hrect(
-        y0=lo,
-        y1=hi,
-        yref="y2",
-        line_width=0,
-        fillcolor=color,
-        opacity=0.11,
-        annotation_text=label if show_level_labels else None,
-        annotation_position="top left",
-        annotation_font=dict(color="white", size=11, family="Arial Black"),
-    )
-
-
 # =========================================================
 # CHART BUILDER - DISCORD STYLE
 # =========================================================
@@ -1301,35 +1131,27 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     except Exception:
         put_gamma_level = None
 
-    manual_levels = flow_data.get("manual_levels", {}) or {}
-    oi_levels = flow_data.get("oi_levels", {}) or {}
+    if call_gamma_level:
+        fig.add_hline(
+            y=call_gamma_level,
+            line=dict(color="#22c55e", width=3, dash="dash"),
+            yref="y2",
+            annotation_text=f"Call Gamma {fmt_price(call_gamma_level)}",
+            annotation_position="top left",
+            annotation_font=dict(color="#22c55e", size=12, family="Arial Black"),
+            annotation_bgcolor="rgba(0,0,0,0.70)",
+        )
 
-    if show_primary_dealer_levels:
-        add_price_level(fig, call_gamma_level, "Call Wall", "#22c55e", dash="dash", width=4, position="top left")
-        add_price_level(fig, put_gamma_level, "Put Wall", "#ef4444", dash="dash", width=4, position="bottom left")
-        add_price_level(fig, manual_levels.get("gamma_flip"), "Gamma Flip", "#00e5ff", dash="solid", width=4, position="top right")
-        add_price_level(fig, manual_levels.get("volatility_trigger"), "Vol Trigger", "#a855f7", dash="solid", width=4, position="bottom right")
-
-    if show_oi_levels:
-        for idx, level in enumerate(oi_levels.get("top_call_oi", []), start=1):
-            add_price_level(fig, level, f"Call OI {idx}", "#facc15", dash="dot", width=2, position="top left")
-
-        for idx, level in enumerate(oi_levels.get("top_put_oi", []), start=1):
-            add_price_level(fig, level, f"Put OI {idx}", "#cbd5e1", dash="dot", width=2, position="bottom left")
-
-    if show_daily_levels:
-        add_price_zone(fig, manual_levels.get("daily_supply"), manual_levels.get("daily_mid"), "Daily Supply", "#ef4444")
-        add_price_zone(fig, manual_levels.get("daily_mid"), manual_levels.get("daily_demand"), "Daily Demand", "#22c55e")
-        add_price_level(fig, manual_levels.get("daily_supply"), "Daily Supply", "#ef4444", dash="dash", width=2, position="top left")
-        add_price_level(fig, manual_levels.get("daily_mid"), "Daily Mid", "#facc15", dash="dot", width=2, position="top left")
-        add_price_level(fig, manual_levels.get("daily_demand"), "Daily Demand", "#22c55e", dash="dash", width=2, position="bottom left")
-
-    if show_weekly_levels:
-        add_price_zone(fig, manual_levels.get("weekly_supply"), manual_levels.get("weekly_mid"), "Weekly Supply", "#991b1b")
-        add_price_zone(fig, manual_levels.get("weekly_mid"), manual_levels.get("weekly_demand"), "Weekly Demand", "#166534")
-        add_price_level(fig, manual_levels.get("weekly_supply"), "Weekly Supply", "#f87171", dash="longdash", width=3, position="top right")
-        add_price_level(fig, manual_levels.get("weekly_mid"), "Weekly Mid", "#fde047", dash="dot", width=2, position="top right")
-        add_price_level(fig, manual_levels.get("weekly_demand"), "Weekly Demand", "#4ade80", dash="longdash", width=3, position="bottom right")
+    if put_gamma_level:
+        fig.add_hline(
+            y=put_gamma_level,
+            line=dict(color="#ef4444", width=3, dash="dash"),
+            yref="y2",
+            annotation_text=f"Put Gamma {fmt_price(put_gamma_level)}",
+            annotation_position="bottom left",
+            annotation_font=dict(color="#ef4444", size=12, family="Arial Black"),
+            annotation_bgcolor="rgba(0,0,0,0.70)",
+        )
 
     if show_flow_dots:
         threshold = float(flow_dot_threshold)
@@ -1487,99 +1309,39 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     price_min = df["spot"].min()
     price_max = df["spot"].max()
 
-    extra_price_levels = []
-
     for gamma_key in ["top_call_gamma", "top_put_gamma"]:
-        extra_price_levels.append(gamma_levels.get(gamma_key))
-
-    # ================================
-    # RIGHT PRICE SCALE FIX
-    # ================================
-    # Keep the right axis based on real price data only.
-    # Dealer / supply / demand levels can be far away; if every level is allowed
-    # to expand y2, SPY/SPX/QQQ price becomes compressed and tick labels stack.
-    spot_reference = None
-    try:
-        spot_reference = float(flow_data.get("spot", 0))
-    except Exception:
-        spot_reference = None
-
-    positive_spots = pd.to_numeric(df.get("spot", pd.Series(dtype=float)), errors="coerce")
-    positive_spots = positive_spots[positive_spots > 0]
-
-    if not positive_spots.empty:
-        price_min = float(positive_spots.min())
-        price_max = float(positive_spots.max())
-        if spot_reference is None or spot_reference <= 0:
-            spot_reference = float(positive_spots.iloc[-1])
-    elif spot_reference and spot_reference > 0:
-        price_min = spot_reference
-        price_max = spot_reference
-    else:
-        price_min = 0.0
-        price_max = 1.0
-
-    manual_levels = flow_data.get("manual_levels", {}) or {}
-    extra_price_levels.extend(manual_levels.values())
-
-    oi_levels = flow_data.get("oi_levels", {}) or {}
-    extra_price_levels.extend(oi_levels.get("top_call_oi", []))
-    extra_price_levels.extend(oi_levels.get("top_put_oi", []))
-
-    # Only nearby levels expand the price axis. Distant lines may still exist,
-    # but they will not destroy the chart scale.
-    max_level_distance = float(level_scale_distance_pct) / 100.0
-
-    for level in extra_price_levels:
         try:
-            level = float(level)
-            if level <= 0:
-                continue
-
-            if keep_price_scale_tight and spot_reference and spot_reference > 0:
-                distance_pct = abs(level - spot_reference) / spot_reference
-                if distance_pct > max_level_distance:
-                    continue
-
-            price_min = min(price_min, level)
-            price_max = max(price_max, level)
+            gamma_value = gamma_levels.get(gamma_key)
+            if gamma_value:
+                gamma_value = float(gamma_value)
+                price_min = min(price_min, gamma_value)
+                price_max = max(price_max, gamma_value)
         except Exception:
             pass
 
     price_span = price_max - price_min
 
-    # Minimum visible price span keeps the white price line readable even when
-    # there is only one snapshot in history.
-    if symbol.upper() == "SPX":
-        min_price_span = 12
-    else:
-        min_price_span = 2.0
+    if price_span <= 0:
+        if symbol.upper() == "SPX":
+            price_span = 10
+        elif symbol.upper() == "TSLA":
+            price_span = 5
+        elif symbol.upper() == "QQQ":
+            price_span = 1
+        else:
+            price_span = 0.75
 
-    if price_span < min_price_span:
-        center = spot_reference if spot_reference and spot_reference > 0 else (price_min + price_max) / 2
-        price_min = center - (min_price_span / 2)
-        price_max = center + (min_price_span / 2)
-        price_span = min_price_span
-
-    price_pad = price_span * 0.08
+    price_pad = price_span * 0.35
     price_range = [price_min - price_pad, price_max + price_pad]
 
-    # Use sane tick spacing. Fixed 0.50 ticks over a large range causes the
-    # stacked-label look seen on the right side of the chart.
     if symbol.upper() == "SPX":
-        if price_span <= 25:
-            price_dtick = 5
-        elif price_span <= 75:
-            price_dtick = 10
-        else:
-            price_dtick = 25
+        price_dtick = 5
+    elif symbol.upper() == "TSLA":
+        price_dtick = 2.5
+    elif symbol.upper() in ["SPY", "QQQ"]:
+        price_dtick = 0.5
     else:
-        if price_span <= 5:
-            price_dtick = 0.5
-        elif price_span <= 15:
-            price_dtick = 1
-        else:
-            price_dtick = 2.5
+        price_dtick = 1
 
     fig.update_layout(
         title=dict(
@@ -1783,12 +1545,12 @@ r1[2].markdown(
 )
 
 r1[3].markdown(
-    metric_html("Call Wall", fmt_price(call_gamma), "green-text"),
+    metric_html("Call Gamma", fmt_price(call_gamma), "green-text"),
     unsafe_allow_html=True,
 )
 
 r1[4].markdown(
-    metric_html("Put Wall", fmt_price(put_gamma), "red-text"),
+    metric_html("Put Gamma", fmt_price(put_gamma), "red-text"),
     unsafe_allow_html=True,
 )
 
