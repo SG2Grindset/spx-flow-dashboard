@@ -416,72 +416,6 @@ with st.sidebar:
     show_signed_delta_line = st.checkbox("Show Signed Delta Line", value=False)
     show_right_labels = st.checkbox("Show Right Edge Labels", value=True)
 
-    st.markdown("---")
-    st.markdown("### 🧭 Dealer / Structure Levels")
-
-    show_primary_dealer_levels = st.checkbox("Show Primary Dealer Levels", value=True)
-    show_oi_levels = st.checkbox("Show OI Levels", value=False)
-    show_daily_levels = st.checkbox("Show Daily Supply/Demand", value=False)
-    show_weekly_levels = st.checkbox("Show Weekly Levels", value=False)
-    show_level_labels = st.checkbox("Show Level Labels", value=True)
-    keep_price_scale_tight = st.checkbox("Keep Price Scale Tight", value=True)
-    level_scale_distance_pct = st.slider(
-        "Level Scale Distance %",
-        min_value=0.5,
-        max_value=5.0,
-        value=1.5,
-        step=0.25,
-        help="Only levels within this percent of spot are allowed to expand the right-side price scale.",
-    )
-
-    st.caption("Leave a level at 0 to hide it. Call/Put walls are calculated from option-chain gamma.")
-
-    gamma_flip_level = st.number_input(
-        "Gamma Flip",
-        min_value=0.0,
-        value=0.0,
-        step=0.5,
-        format="%.2f",
-        key=f"gamma_flip_level_{symbol}",
-    )
-
-    volatility_trigger_level = st.number_input(
-        "Volatility Trigger",
-        min_value=0.0,
-        value=0.0,
-        step=0.5,
-        format="%.2f",
-        key=f"volatility_trigger_level_{symbol}",
-    )
-
-    with st.expander("Daily Supply / Demand Inputs", expanded=False):
-        daily_supply_level = st.number_input(
-            "Daily Supply", min_value=0.0, value=0.0, step=0.5, format="%.2f",
-            key=f"daily_supply_level_{symbol}"
-        )
-        daily_mid_level = st.number_input(
-            "Daily Mid", min_value=0.0, value=0.0, step=0.5, format="%.2f",
-            key=f"daily_mid_level_{symbol}"
-        )
-        daily_demand_level = st.number_input(
-            "Daily Demand", min_value=0.0, value=0.0, step=0.5, format="%.2f",
-            key=f"daily_demand_level_{symbol}"
-        )
-
-    with st.expander("Weekly Supply / Demand Inputs", expanded=False):
-        weekly_supply_level = st.number_input(
-            "Weekly Supply", min_value=0.0, value=0.0, step=0.5, format="%.2f",
-            key=f"weekly_supply_level_{symbol}"
-        )
-        weekly_mid_level = st.number_input(
-            "Weekly Mid", min_value=0.0, value=0.0, step=0.5, format="%.2f",
-            key=f"weekly_mid_level_{symbol}"
-        )
-        weekly_demand_level = st.number_input(
-            "Weekly Demand", min_value=0.0, value=0.0, step=0.5, format="%.2f",
-            key=f"weekly_demand_level_{symbol}"
-        )
-
     default_flow_dot_threshold = FLOW_DOT_THRESHOLDS.get(symbol, 25_000_000)
 
     flow_dot_threshold = st.number_input(
@@ -923,61 +857,9 @@ def get_gamma_levels(chain_df, spot):
     }
 
 
-
-
-def get_top_oi_levels(chain_df, spot, top_n=2):
-    if chain_df is None or chain_df.empty:
-        return {"top_call_oi": [], "top_put_oi": []}
-
-    df = chain_df.copy()
-
-    if "open_interest" not in df.columns or "strike" not in df.columns or "type" not in df.columns:
-        return {"top_call_oi": [], "top_put_oi": []}
-
-    df["open_interest"] = pd.to_numeric(df["open_interest"], errors="coerce").fillna(0)
-    df["strike"] = pd.to_numeric(df["strike"], errors="coerce").fillna(0)
-    df = df[df["open_interest"] > 0]
-
-    spot = float(spot)
-
-    calls = df[(df["type"] == "call") & (df["strike"] >= spot)].copy()
-    puts = df[(df["type"] == "put") & (df["strike"] <= spot)].copy()
-
-    call_oi = (
-        calls.groupby("strike")["open_interest"]
-        .sum()
-        .sort_values(ascending=False)
-        .head(top_n)
-    )
-
-    put_oi = (
-        puts.groupby("strike")["open_interest"]
-        .sum()
-        .sort_values(ascending=False)
-        .head(top_n)
-    )
-
-    return {
-        "top_call_oi": [float(x) for x in call_oi.index.tolist()],
-        "top_put_oi": [float(x) for x in put_oi.index.tolist()],
-    }
-
-
-def build_manual_levels():
-    return {
-        "gamma_flip": gamma_flip_level,
-        "volatility_trigger": volatility_trigger_level,
-        "daily_supply": daily_supply_level,
-        "daily_mid": daily_mid_level,
-        "daily_demand": daily_demand_level,
-        "weekly_supply": weekly_supply_level,
-        "weekly_mid": weekly_mid_level,
-        "weekly_demand": weekly_demand_level,
-    }
-
-
-def load_expiration_flow(symbol):
+def load_expiration_flow(symbol, strike_width=None):
     spot = get_price(symbol)
+    width = strike_width if strike_width is not None else chain_width
     expirations = get_expirations(symbol)
 
     today_exp = expirations[0]
@@ -991,7 +873,7 @@ def load_expiration_flow(symbol):
         zero_dte_chain = filter_near_spot(
             zero_dte_chain,
             spot,
-            chain_width,
+            width,
         )
 
     for exp in selected_expirations:
@@ -1006,7 +888,7 @@ def load_expiration_flow(symbol):
         all_chain = filter_near_spot(
             all_chain,
             spot,
-            chain_width,
+            width,
         )
     else:
         all_chain = pd.DataFrame()
@@ -1014,7 +896,6 @@ def load_expiration_flow(symbol):
     zero_flow = calculate_net_flow(zero_dte_chain)
     all_flow = calculate_net_flow(all_chain)
     gamma_levels = get_gamma_levels(all_chain, spot)
-    oi_levels = get_top_oi_levels(all_chain, spot, top_n=2)
 
     return {
         "symbol": symbol,
@@ -1024,8 +905,6 @@ def load_expiration_flow(symbol):
         "zero_dte": zero_flow,
         "all_exp": all_flow,
         "gamma_levels": gamma_levels,
-        "oi_levels": oi_levels,
-        "manual_levels": build_manual_levels(),
     }
 
 
@@ -1160,54 +1039,6 @@ def add_right_edge_label(fig, x, y, text, bg, yref="y", xshift=10):
     )
 
 
-
-
-def valid_level(value):
-    try:
-        value = float(value)
-        return value if value > 0 else None
-    except Exception:
-        return None
-
-
-def add_price_level(fig, value, label, color, dash="dash", width=2, position="top left"):
-    level = valid_level(value)
-    if level is None:
-        return
-
-    fig.add_hline(
-        y=level,
-        line=dict(color=color, width=width, dash=dash),
-        yref="y2",
-        annotation_text=f"{label} {fmt_price(level)}" if show_level_labels else None,
-        annotation_position=position,
-        annotation_font=dict(color=color, size=12, family="Arial Black"),
-        annotation_bgcolor="rgba(0,0,0,0.70)",
-    )
-
-
-def add_price_zone(fig, upper, lower, label, color):
-    upper = valid_level(upper)
-    lower = valid_level(lower)
-    if upper is None or lower is None:
-        return
-
-    lo = min(upper, lower)
-    hi = max(upper, lower)
-
-    fig.add_hrect(
-        y0=lo,
-        y1=hi,
-        yref="y2",
-        line_width=0,
-        fillcolor=color,
-        opacity=0.11,
-        annotation_text=label if show_level_labels else None,
-        annotation_position="top left",
-        annotation_font=dict(color="white", size=11, family="Arial Black"),
-    )
-
-
 # =========================================================
 # CHART BUILDER - DISCORD STYLE
 # =========================================================
@@ -1301,35 +1132,27 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     except Exception:
         put_gamma_level = None
 
-    manual_levels = flow_data.get("manual_levels", {}) or {}
-    oi_levels = flow_data.get("oi_levels", {}) or {}
+    if call_gamma_level:
+        fig.add_hline(
+            y=call_gamma_level,
+            line=dict(color="#22c55e", width=3, dash="dash"),
+            yref="y2",
+            annotation_text=f"Call Gamma {fmt_price(call_gamma_level)}",
+            annotation_position="top left",
+            annotation_font=dict(color="#22c55e", size=12, family="Arial Black"),
+            annotation_bgcolor="rgba(0,0,0,0.70)",
+        )
 
-    if show_primary_dealer_levels:
-        add_price_level(fig, call_gamma_level, "Call Wall", "#22c55e", dash="dash", width=4, position="top left")
-        add_price_level(fig, put_gamma_level, "Put Wall", "#ef4444", dash="dash", width=4, position="bottom left")
-        add_price_level(fig, manual_levels.get("gamma_flip"), "Gamma Flip", "#00e5ff", dash="solid", width=4, position="top right")
-        add_price_level(fig, manual_levels.get("volatility_trigger"), "Vol Trigger", "#a855f7", dash="solid", width=4, position="bottom right")
-
-    if show_oi_levels:
-        for idx, level in enumerate(oi_levels.get("top_call_oi", []), start=1):
-            add_price_level(fig, level, f"Call OI {idx}", "#facc15", dash="dot", width=2, position="top left")
-
-        for idx, level in enumerate(oi_levels.get("top_put_oi", []), start=1):
-            add_price_level(fig, level, f"Put OI {idx}", "#cbd5e1", dash="dot", width=2, position="bottom left")
-
-    if show_daily_levels:
-        add_price_zone(fig, manual_levels.get("daily_supply"), manual_levels.get("daily_mid"), "Daily Supply", "#ef4444")
-        add_price_zone(fig, manual_levels.get("daily_mid"), manual_levels.get("daily_demand"), "Daily Demand", "#22c55e")
-        add_price_level(fig, manual_levels.get("daily_supply"), "Daily Supply", "#ef4444", dash="dash", width=2, position="top left")
-        add_price_level(fig, manual_levels.get("daily_mid"), "Daily Mid", "#facc15", dash="dot", width=2, position="top left")
-        add_price_level(fig, manual_levels.get("daily_demand"), "Daily Demand", "#22c55e", dash="dash", width=2, position="bottom left")
-
-    if show_weekly_levels:
-        add_price_zone(fig, manual_levels.get("weekly_supply"), manual_levels.get("weekly_mid"), "Weekly Supply", "#991b1b")
-        add_price_zone(fig, manual_levels.get("weekly_mid"), manual_levels.get("weekly_demand"), "Weekly Demand", "#166534")
-        add_price_level(fig, manual_levels.get("weekly_supply"), "Weekly Supply", "#f87171", dash="longdash", width=3, position="top right")
-        add_price_level(fig, manual_levels.get("weekly_mid"), "Weekly Mid", "#fde047", dash="dot", width=2, position="top right")
-        add_price_level(fig, manual_levels.get("weekly_demand"), "Weekly Demand", "#4ade80", dash="longdash", width=3, position="bottom right")
+    if put_gamma_level:
+        fig.add_hline(
+            y=put_gamma_level,
+            line=dict(color="#ef4444", width=3, dash="dash"),
+            yref="y2",
+            annotation_text=f"Put Gamma {fmt_price(put_gamma_level)}",
+            annotation_position="bottom left",
+            annotation_font=dict(color="#ef4444", size=12, family="Arial Black"),
+            annotation_bgcolor="rgba(0,0,0,0.70)",
+        )
 
     if show_flow_dots:
         threshold = float(flow_dot_threshold)
@@ -1484,102 +1307,51 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     flow_pad = flow_span * 0.18
     flow_range = [flow_min - flow_pad, flow_max + flow_pad]
 
-    price_min = df["spot"].min()
-    price_max = df["spot"].max()
+    # =========================================================
+    # TIGHT PRICE AXIS SCALING
+    # =========================================================
+    # Keep the right-side price axis focused on price + the two gamma levels.
+    # This prevents the price line from looking compressed while still showing
+    # Call Gamma / Put Gamma cleanly on the chart.
+    spot_min = float(df["spot"].min())
+    spot_max = float(df["spot"].max())
 
-    extra_price_levels = []
+    price_candidates = [spot_min, spot_max]
 
-    for gamma_key in ["top_call_gamma", "top_put_gamma"]:
-        extra_price_levels.append(gamma_levels.get(gamma_key))
+    if call_gamma_level is not None:
+        price_candidates.append(float(call_gamma_level))
 
-    # ================================
-    # RIGHT PRICE SCALE FIX
-    # ================================
-    # Keep the right axis based on real price data only.
-    # Dealer / supply / demand levels can be far away; if every level is allowed
-    # to expand y2, SPY/SPX/QQQ price becomes compressed and tick labels stack.
-    spot_reference = None
-    try:
-        spot_reference = float(flow_data.get("spot", 0))
-    except Exception:
-        spot_reference = None
+    if put_gamma_level is not None:
+        price_candidates.append(float(put_gamma_level))
 
-    positive_spots = pd.to_numeric(df.get("spot", pd.Series(dtype=float)), errors="coerce")
-    positive_spots = positive_spots[positive_spots > 0]
-
-    if not positive_spots.empty:
-        price_min = float(positive_spots.min())
-        price_max = float(positive_spots.max())
-        if spot_reference is None or spot_reference <= 0:
-            spot_reference = float(positive_spots.iloc[-1])
-    elif spot_reference and spot_reference > 0:
-        price_min = spot_reference
-        price_max = spot_reference
-    else:
-        price_min = 0.0
-        price_max = 1.0
-
-    manual_levels = flow_data.get("manual_levels", {}) or {}
-    extra_price_levels.extend(manual_levels.values())
-
-    oi_levels = flow_data.get("oi_levels", {}) or {}
-    extra_price_levels.extend(oi_levels.get("top_call_oi", []))
-    extra_price_levels.extend(oi_levels.get("top_put_oi", []))
-
-    # Only nearby levels expand the price axis. Distant lines may still exist,
-    # but they will not destroy the chart scale.
-    max_level_distance = float(level_scale_distance_pct) / 100.0
-
-    for level in extra_price_levels:
-        try:
-            level = float(level)
-            if level <= 0:
-                continue
-
-            if keep_price_scale_tight and spot_reference and spot_reference > 0:
-                distance_pct = abs(level - spot_reference) / spot_reference
-                if distance_pct > max_level_distance:
-                    continue
-
-            price_min = min(price_min, level)
-            price_max = max(price_max, level)
-        except Exception:
-            pass
-
+    price_min = min(price_candidates)
+    price_max = max(price_candidates)
     price_span = price_max - price_min
 
-    # Minimum visible price span keeps the white price line readable even when
-    # there is only one snapshot in history.
-    if symbol.upper() == "SPX":
-        min_price_span = 12
-    else:
-        min_price_span = 2.0
+    # Fallback when price is flat or only one print exists.
+    if price_span <= 0:
+        if symbol.upper() == "SPX":
+            price_span = 8
+        elif symbol.upper() == "QQQ":
+            price_span = 2
+        else:  # SPY
+            price_span = 1.5
 
-    if price_span < min_price_span:
-        center = spot_reference if spot_reference and spot_reference > 0 else (price_min + price_max) / 2
-        price_min = center - (min_price_span / 2)
-        price_max = center + (min_price_span / 2)
-        price_span = min_price_span
+        center = float(latest_spot) if latest_spot else (price_min + price_max) / 2
+        price_min = center - price_span / 2
+        price_max = center + price_span / 2
 
-    price_pad = price_span * 0.08
+    # Tight padding: enough breathing room without wasting chart space.
+    price_pad = price_span * 0.10
     price_range = [price_min - price_pad, price_max + price_pad]
 
-    # Use sane tick spacing. Fixed 0.50 ticks over a large range causes the
-    # stacked-label look seen on the right side of the chart.
+    # Better tick spacing by symbol.
     if symbol.upper() == "SPX":
-        if price_span <= 25:
-            price_dtick = 5
-        elif price_span <= 75:
-            price_dtick = 10
-        else:
-            price_dtick = 25
+        price_dtick = 2.5
+    elif symbol.upper() in ["SPY", "QQQ"]:
+        price_dtick = 0.5
     else:
-        if price_span <= 5:
-            price_dtick = 0.5
-        elif price_span <= 15:
-            price_dtick = 1
-        else:
-            price_dtick = 2.5
+        price_dtick = 1
 
     fig.update_layout(
         title=dict(
@@ -1783,12 +1555,12 @@ r1[2].markdown(
 )
 
 r1[3].markdown(
-    metric_html("Call Wall", fmt_price(call_gamma), "green-text"),
+    metric_html("Call Gamma", fmt_price(call_gamma), "green-text"),
     unsafe_allow_html=True,
 )
 
 r1[4].markdown(
-    metric_html("Put Wall", fmt_price(put_gamma), "red-text"),
+    metric_html("Put Gamma", fmt_price(put_gamma), "red-text"),
     unsafe_allow_html=True,
 )
 
@@ -1924,54 +1696,48 @@ with right_matrix:
 
         for sym in SYMBOLS:
             try:
-                sym_snapshot = (
-                    snapshot
-                    if sym == symbol
-                    else get_flow_snapshot(
-                        symbol=sym,
-                        all_exp_count=all_exp_count,
-                        chart_bucket=chart_bucket,
-                        lookback_hours=lookback_hours,
-                        strike_width=chain_width,
-                    )
+                # Use the same expiration-flow engine that powers the chart.
+                # This avoids blank matrix cells when flow_engine.get_flow_snapshot()
+                # does not return the old matrix keys.
+                sym_width = CHAIN_WIDTH_DEFAULTS.get(sym, 100)
+                sym_flow = exp_flow_data if sym == symbol else load_expiration_flow(sym, strike_width=sym_width)
+
+                sym_spot = sym_flow.get("spot", 0)
+                sym_zero_net = sym_flow.get("zero_dte", {}).get("net_premium", 0)
+                sym_all_net = sym_flow.get("all_exp", {}).get("net_premium", 0)
+                sym_call_gamma = sym_flow.get("gamma_levels", {}).get("top_call_gamma")
+                sym_put_gamma = sym_flow.get("gamma_levels", {}).get("top_put_gamma")
+
+                flow_status = status_from_value(sym_zero_net)
+                all_status = status_from_value(sym_all_net)
+
+                rows.append(
+                    {
+                        "Symbol": f"{SYMBOL_ICONS.get(sym, '')} {sym}",
+                        "Spot": fmt_price(sym_spot),
+                        "0DTE Flow": f"<span class='{color_class(sym_zero_net)}'>{fmt_money(sym_zero_net)}</span>",
+                        "All Exp Flow": f"<span class='{color_class(sym_all_net)}'>{fmt_money(sym_all_net)}</span>",
+                        "Flow Bias": dot_from_status(flow_status),
+                        "All Bias": dot_from_status(all_status),
+                        "Call Gamma": f"<span class='green-text'>{fmt_price(sym_call_gamma)}</span>",
+                        "Put Gamma": f"<span class='red-text'>{fmt_price(sym_put_gamma)}</span>",
+                    }
                 )
+
             except Exception as e:
-                st.warning(f"{sym} matrix load failed: {e}")
-                sym_snapshot = {}
-
-            flow_net = safe_get(sym_snapshot, "odte_premium_net", 0)
-            div_value = safe_get(sym_snapshot, "divergence_value", 0)
-            gamma_value = safe_get(sym_snapshot, "gamma_signal", 0)
-            pulse_value = safe_get(sym_snapshot, "pulse_drop_signal", 0)
-
-            flow_status = status_from_value(
-                1
-                if flow_net >= FLOW_DOT_THRESHOLDS.get(sym, 25_000_000)
-                else -1
-                if flow_net <= -FLOW_DOT_THRESHOLDS.get(sym, 25_000_000)
-                else 0
-            )
-
-            divergence_status = status_from_value(
-                1
-                if div_value >= DIVERGENCE_THRESHOLDS.get(sym, 10_000_000)
-                else -1
-                if div_value <= -DIVERGENCE_THRESHOLDS.get(sym, 10_000_000)
-                else 0
-            )
-
-            gamma_status = status_from_value(gamma_value)
-            pulse_status = status_from_value(pulse_value)
-
-            rows.append(
-                {
-                    "Symbol": f"{SYMBOL_ICONS.get(sym, '')} {sym}",
-                    "Flow": dot_from_status(flow_status),
-                    "Div": dot_from_status(divergence_status),
-                    "Gamma": dot_from_status(gamma_status),
-                    "Pulse": dot_from_status(pulse_status),
-                }
-            )
+                rows.append(
+                    {
+                        "Symbol": f"{SYMBOL_ICONS.get(sym, '')} {sym}",
+                        "Spot": "—",
+                        "0DTE Flow": "—",
+                        "All Exp Flow": "—",
+                        "Flow Bias": "⚠️",
+                        "All Bias": "⚠️",
+                        "Call Gamma": "—",
+                        "Put Gamma": "—",
+                    }
+                )
+                st.caption(f"{sym} matrix load failed: {e}")
 
         matrix_df = pd.DataFrame(rows)
         matrix_html = matrix_df.to_html(index=False, escape=False)
