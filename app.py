@@ -1559,12 +1559,11 @@ with left_chart:
     st.markdown("</div>", unsafe_allow_html=True)
 
 with right_matrix:
-    matrix_html = build_matrix_html(matrix_data)
 
-    components.html(
-        matrix_html,
-        height=430,
-        scrolling=False,
-    )
+    st.markdown(
+        build_matrix_html(matrix_data),
+        unsafe_allow_html=True,
+)
+
 
 st.caption("All values are real-time estimates. Not financial advice. Data may be delayed.")
