@@ -1,10 +1,16 @@
+# ============================================================
+# app.py
+# SG² MATRIX
+# SPY / SPX / QQQ
+# Gamma-only chart + clean dot matrix
+# Chart style based on expiration_flow_dashboard.py
+# ============================================================
+
 import os
 import time
 from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
-
-CENTRAL_TZ = ZoneInfo("America/Chicago")
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -13,22 +19,23 @@ import streamlit as st
 from dotenv import load_dotenv
 from streamlit_autorefresh import st_autorefresh
 
-from flow_engine import get_flow_snapshot
+CENTRAL_TZ = ZoneInfo("America/Chicago")
 
-
-# =========================================================
+# ============================================================
 # PAGE CONFIG
-# =========================================================
+# ============================================================
+
 st.set_page_config(
     page_title="SG² MATRIX",
+    page_icon="🧠",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-
-# =========================================================
+# ============================================================
 # ENV / TRADIER
-# =========================================================
+# ============================================================
+
 ENV_PATH = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=ENV_PATH, override=True)
 
@@ -40,10 +47,46 @@ HEADERS = {
     "Accept": "application/json",
 }
 
+# ============================================================
+# SYMBOL CONFIG
+# ============================================================
 
-# =========================================================
+SYMBOLS = ["SPY", "SPX", "QQQ"]
+
+SYMBOL_ICONS = {
+    "SPY": "🕷️",
+    "SPX": "📈",
+    "QQQ": "📊",
+}
+
+FLOW_DOT_DEFAULTS = {
+    "SPY": 25_000_000,
+    "SPX": 150_000_000,
+    "QQQ": 25_000_000,
+}
+
+DIVERGENCE_DEFAULTS = {
+    "SPY": 10_000_000,
+    "SPX": 30_000_000,
+    "QQQ": 10_000_000,
+}
+
+PULSE_DEFAULTS = {
+    "SPY": 25_000_000,
+    "SPX": 100_000_000,
+    "QQQ": 25_000_000,
+}
+
+CHAIN_WIDTH_DEFAULTS = {
+    "SPY": 100,
+    "SPX": 500,
+    "QQQ": 100,
+}
+
+# ============================================================
 # PASSWORD PROTECTION
-# =========================================================
+# ============================================================
+
 def check_password():
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
@@ -127,10 +170,7 @@ def check_password():
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        '<div class="password-label">Enter Password</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="password-label">Enter Password</div>', unsafe_allow_html=True)
 
     password = st.text_input("", type="password", label_visibility="collapsed")
 
@@ -153,46 +193,10 @@ def check_password():
 if not check_password():
     st.stop()
 
-
-# =========================================================
-# SYMBOL CONFIG
-# =========================================================
-SYMBOLS = ["SPY", "SPX", "QQQ"]
-
-SYMBOL_ICONS = {
-    "SPY": "🕷️",
-    "SPX": "📈",
-    "QQQ": "📊",
-}
-
-FLOW_DOT_THRESHOLDS = {
-    "SPY": 25_000_000,
-    "SPX": 150_000_000,
-    "QQQ": 25_000_000,
-}
-
-DIVERGENCE_THRESHOLDS = {
-    "SPY": 10_000_000,
-    "SPX": 30_000_000,
-    "QQQ": 10_000_000,
-}
-
-PULSE_DROP_THRESHOLDS = {
-    "SPY": 25_000_000,
-    "SPX": 100_000_000,
-    "QQQ": 25_000_000,
-}
-
-CHAIN_WIDTH_DEFAULTS = {
-    "SPY": 100,
-    "SPX": 500,
-    "QQQ": 100,
-}
-
-
-# =========================================================
+# ============================================================
 # SESSION STATE
-# =========================================================
+# ============================================================
+
 if "selected_symbol" not in st.session_state:
     st.session_state.selected_symbol = "SPX"
 
@@ -201,24 +205,28 @@ if st.session_state.selected_symbol not in SYMBOLS:
 
 symbol = st.session_state.selected_symbol
 
+# ============================================================
+# GLOBAL CSS
+# ============================================================
 
-# =========================================================
-# CSS
-# =========================================================
 st.markdown(
     """
 <style>
 html, body, .stApp {
-    background: radial-gradient(circle at top left, #14202b 0%, #070b10 45%, #020407 100%) !important;
+    background: radial-gradient(circle at top left, #101923 0%, #060a0f 42%, #010305 100%) !important;
     color: #f4f7fb !important;
 }
 
 .main .block-container {
     background: transparent !important;
     padding-top: 1rem;
-    padding-left: 1.4rem;
-    padding-right: 1.4rem;
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
     max-width: 100%;
+}
+
+[data-testid="stHeader"] {
+    background: transparent !important;
 }
 
 section[data-testid="stSidebar"] {
@@ -253,11 +261,6 @@ section[data-testid="stSidebar"] div[data-baseweb="input"] {
     border-radius: 8px !important;
 }
 
-section[data-testid="stSidebar"] .stSlider label,
-section[data-testid="stSidebar"] .stSlider span {
-    color: #ffffff !important;
-}
-
 .stButton > button {
     height: 58px;
     border-radius: 13px;
@@ -276,53 +279,40 @@ section[data-testid="stSidebar"] .stSlider span {
     box-shadow: 0 0 22px rgba(0, 212, 106, .45);
 }
 
-.active-bar {
-    width: 100%;
-    padding: 15px 0;
-    margin: 12px 0 14px 0;
-    text-align: center;
-    border-radius: 14px;
-    color: #ffffff;
-    font-size: 22px;
-    font-weight: 900;
-    background: linear-gradient(90deg, #064225, #06381f, #052416);
-    border: 1px solid #00d46a;
-    box-shadow: 0 0 24px rgba(0, 212, 106, .35);
-}
-
-.metric-card,
-.header-card,
-.matrix-card {
-    background: linear-gradient(180deg, #111923, #0b1118) !important;
-    border: 1px solid #263241;
-    border-radius: 14px;
-    box-shadow: 0 0 18px rgba(0,0,0,.35);
-}
-
+.top-card,
+.chart-card,
+.matrix-card,
 .metric-card {
-    padding: 14px 20px;
+    background: linear-gradient(145deg, rgba(17,25,35,.98), rgba(6,11,16,.98)) !important;
+    border: 1px solid #263746;
+    border-radius: 16px;
+    box-shadow: 0 0 22px rgba(0,0,0,.45);
+}
+
+.top-card {
+    padding: 18px 22px;
+    margin-bottom: 14px;
+}
+
+.chart-card {
+    padding: 14px 14px 4px 14px;
+}
+
+.matrix-card {
+    padding: 14px;
+}
+
+.top-title {
+    font-size: 26px;
+    font-weight: 950;
+    color: white;
     margin-bottom: 12px;
 }
 
-.header-card {
-    padding: 16px 20px;
-    margin: 8px 0 10px 0;
-}
-
-.matrix-card {
-    padding: 10px;
-}
-
-.metric-label {
-    color: #ffdd00;
-    font-size: 12px;
+.top-line {
+    font-size: 14px;
     font-weight: 900;
-}
-
-.metric-value {
-    color: #ffffff;
-    font-size: 19px;
-    font-weight: 900;
+    color: white;
 }
 
 .green-text { color: #31e75f !important; }
@@ -332,236 +322,230 @@ section[data-testid="stSidebar"] .stSlider span {
 
 .matrix-title {
     color: white;
-    font-size: 19px;
-    font-weight: 900;
-    margin-bottom: 10px;
-    letter-spacing: .5px;
+    font-size: 22px;
+    font-weight: 950;
+    margin-bottom: 14px;
+    letter-spacing: .4px;
 }
 
-.sg2-matrix table {
+.sg2-dot-matrix table {
     width: 100%;
     border-collapse: collapse;
     background: #0b1118;
     color: white;
-    font-size: 13px;
-    border-radius: 12px;
+    font-size: 18px;
+    border-radius: 14px;
     overflow: hidden;
+    table-layout: fixed;
 }
 
-.sg2-matrix th {
+.sg2-dot-matrix th {
     color: #ffdd00;
-    background: #111923;
-    padding: 8px;
-    border: 1px solid #263241;
+    background: linear-gradient(180deg, #14202b, #0e1720);
+    padding: 15px 8px;
+    border: 1px solid rgba(38,50,65,.55);
     text-align: center;
-    font-weight: 900;
+    font-weight: 950;
 }
 
-.sg2-matrix td {
-    padding: 8px;
-    border: 1px solid #263241;
+.sg2-dot-matrix td {
+    padding: 18px 8px;
+    border: 1px solid rgba(38,50,65,.45);
     text-align: center;
-    background: #0b1118;
+    background: rgba(8,13,19,.86);
+    font-weight: 950;
 }
 
-.sg2-matrix td:first-child {
+.sg2-dot-matrix tr:nth-child(even) td {
+    background: rgba(13,20,29,.92);
+}
+
+.sg2-dot-matrix td:first-child,
+.sg2-dot-matrix th:first-child {
     text-align: left;
-    font-weight: 900;
+    width: 28%;
 }
 
-hr {
-    border-color: #263241;
+.dot {
+    display: inline-block;
+    width: 19px;
+    height: 19px;
+    border-radius: 50%;
+    vertical-align: middle;
+    box-shadow: 0 0 12px currentColor, inset 0 0 7px rgba(255,255,255,.45);
+}
+
+.dot-green {
+    background: #31e75f;
+    color: #31e75f;
+}
+
+.dot-red {
+    background: #ff4b4b;
+    color: #ff4b4b;
+}
+
+.dot-purple {
+    background: #a855f7;
+    color: #a855f7;
+}
+
+.dot-yellow {
+    background: #facc15;
+    color: #facc15;
+}
+
+.symbol-cell {
+    color: white;
+    font-weight: 950;
+    white-space: nowrap;
 }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-
-# =========================================================
+# ============================================================
 # SIDEBAR
-# =========================================================
+# ============================================================
+
 with st.sidebar:
     st.markdown("## ⚙️ Dashboard Controls")
 
     auto_refresh = st.checkbox("Auto Refresh", value=True)
 
-    refresh_interval = st.selectbox(
+    refresh_seconds = st.selectbox(
         "Refresh Interval",
-        options=[5, 10, 15, 30, 60],
+        [5, 10, 15, 30, 60],
         index=2,
     )
 
-    all_exp_count = st.slider(
+    expiration_count = st.slider(
         "All Expirations Count",
         min_value=2,
         max_value=10,
         value=5,
+        step=1,
     )
 
-    chart_bucket = st.selectbox(
+    bucket_minutes = st.selectbox(
         "Chart Bucket",
-        options=[1, 3, 5],
+        [1, 3, 5],
         index=0,
     )
 
     lookback_hours = st.slider(
         "Lookback Hours",
         min_value=1,
-        max_value=8,
+        max_value=10,
         value=2,
+        step=1,
     )
 
     show_flow_dots = st.checkbox("Show FLOW Dots", value=True)
-    show_signed_delta_line = st.checkbox("Show Signed Delta Line", value=False)
     show_right_labels = st.checkbox("Show Right Edge Labels", value=True)
 
-    default_flow_dot_threshold = FLOW_DOT_THRESHOLDS.get(symbol, 25_000_000)
+    default_flow_dot_threshold = FLOW_DOT_DEFAULTS.get(symbol.upper(), 25_000_000)
 
     flow_dot_threshold = st.number_input(
         "FLOW Dot Threshold",
         min_value=0,
         value=default_flow_dot_threshold,
         step=5_000_000,
-        key=f"flow_dot_threshold_{symbol}",
     )
-
-    st.caption(f"Default for {symbol}: {default_flow_dot_threshold:,}")
-
-    show_matrix = st.checkbox("Show SG² Matrix", value=True)
 
     divergence_threshold = st.number_input(
         "Divergence Threshold",
         min_value=0,
-        value=DIVERGENCE_THRESHOLDS.get(symbol, 10_000_000),
+        value=DIVERGENCE_DEFAULTS.get(symbol.upper(), 10_000_000),
         step=1_000_000,
-        key=f"divergence_threshold_{symbol}",
     )
 
-    pulse_drop_threshold = st.number_input(
-        "Pulse/Drop Threshold",
+    pulse_threshold = st.number_input(
+        "Pulse Threshold",
         min_value=0,
-        value=PULSE_DROP_THRESHOLDS.get(symbol, 25_000_000),
+        value=PULSE_DEFAULTS.get(symbol.upper(), 25_000_000),
         step=1_000_000,
-        key=f"pulse_drop_threshold_{symbol}",
     )
 
     chain_width = st.slider(
         "Strike Width Around Spot",
         min_value=25,
         max_value=1000,
-        value=CHAIN_WIDTH_DEFAULTS.get(symbol, 100),
+        value=CHAIN_WIDTH_DEFAULTS.get(symbol.upper(), 100),
         step=25,
     )
 
-    reset_exp_history = st.button("Reset Flow Chart History")
-
-    st.markdown("---")
-    st.caption("Chart model: 0DTE and All Expiration net premium flow changes.")
-    st.caption("FLOW dots trigger when flow crosses positive/negative threshold.")
-
+    reset_history = st.button("Reset Flow Chart History")
 
 if auto_refresh:
     st_autorefresh(
-        interval=refresh_interval * 1000,
-        key="flow_refresh_main",
+        interval=refresh_seconds * 1000,
+        key="sg2_matrix_refresh",
     )
 
+# ============================================================
+# HELPERS
+# ============================================================
 
-# =========================================================
-# FORMAT HELPERS
-# =========================================================
-def fmt_money(value):
+def money_fmt(v):
     try:
-        value = float(value)
-    except Exception:
-        return "0"
+        v = float(v)
 
-    abs_val = abs(value)
+        if abs(v) >= 1_000_000_000:
+            return f"{v / 1_000_000_000:.2f}B"
 
-    if abs_val >= 1_000_000_000:
-        return f"{value / 1_000_000_000:.2f}B"
-    if abs_val >= 1_000_000:
-        return f"{value / 1_000_000:.1f}M"
-    if abs_val >= 1_000:
-        return f"{value / 1_000:.1f}K"
+        if abs(v) >= 1_000_000:
+            return f"{v / 1_000_000:.1f}M"
 
-    return f"{value:.0f}"
+        if abs(v) >= 1_000:
+            return f"{v / 1_000:.0f}K"
 
+        return f"{v:.0f}"
 
-def fmt_num(value):
-    try:
-        value = float(value)
-    except Exception:
-        return "0"
-
-    if abs(value) >= 1_000_000:
-        return f"{value / 1_000_000:.1f}M"
-    if abs(value) >= 1_000:
-        return f"{value / 1_000:.1f}K"
-
-    return f"{value:.0f}"
-
-
-def fmt_price(value):
-    try:
-        return f"{float(value):,.2f}"
     except Exception:
         return "—"
 
 
-def metric_html(label, value, color_class=""):
-    return f"""
-    <div>
-        <div class="metric-label">{label}</div>
-        <div class="metric-value {color_class}">{value}</div>
-    </div>
-    """
+def fmt(v):
+    try:
+        return f"{float(v):,.2f}"
+    except Exception:
+        return "—"
 
 
-def color_class(value):
+def status_from_value(value, threshold=0):
     try:
         value = float(value)
+        threshold = float(threshold)
     except Exception:
-        return ""
+        return "neutral"
 
-    if value > 0:
-        return "green-text"
-    if value < 0:
-        return "red-text"
-    return ""
+    if value > threshold:
+        return "bull"
+    if value < -threshold:
+        return "bear"
+    return "neutral"
 
 
-def safe_get(snapshot, key, default=0):
-    if not isinstance(snapshot, dict):
+def dot_html(status):
+    if status == "bull":
+        return '<span class="dot dot-green"></span>'
+    if status == "bear":
+        return '<span class="dot dot-red"></span>'
+    return '<span class="dot dot-purple"></span>'
+
+
+def safe_float(v, default=0.0):
+    try:
+        return float(v)
+    except Exception:
         return default
-    return snapshot.get(key, default)
 
+# ============================================================
+# TRADIER
+# ============================================================
 
-def status_from_value(value):
-    try:
-        value = float(value)
-    except Exception:
-        value = 0
-
-    if value > 0:
-        return "BULLISH"
-    if value < 0:
-        return "BEARISH"
-    return "NEUTRAL"
-
-
-def dot_from_status(status):
-    if status == "BULLISH":
-        return "🟢"
-    if status == "BEARISH":
-        return "🔴"
-    return "🟣"
-
-
-# =========================================================
-# TRADIER / EXPIRATION FLOW ENGINE
-# =========================================================
 def tradier_get(endpoint, params=None):
     if not TRADIER_API_KEY:
         raise Exception("Missing TRADIER_API_KEY in .env")
@@ -750,6 +734,9 @@ def get_option_chain(symbol, expiration):
 
     return df
 
+# ============================================================
+# FLOW / GAMMA ENGINE
+# ============================================================
 
 def filter_near_spot(df, spot, width):
     return df[
@@ -821,20 +808,12 @@ def get_gamma_levels(chain_df, spot):
     df["gamma"] = pd.to_numeric(df["gamma"], errors="coerce").fillna(0)
     df["open_interest"] = pd.to_numeric(df["open_interest"], errors="coerce").fillna(0)
     df["strike"] = pd.to_numeric(df["strike"], errors="coerce").fillna(0)
-
     df["gamma_exposure"] = df["gamma"] * df["open_interest"] * 100
 
     spot = float(spot)
 
-    calls = df[
-        (df["type"] == "call")
-        & (df["strike"] >= spot)
-    ].copy()
-
-    puts = df[
-        (df["type"] == "put")
-        & (df["strike"] <= spot)
-    ].copy()
+    calls = df[(df["type"] == "call") & (df["strike"] >= spot)].copy()
+    puts = df[(df["type"] == "put") & (df["strike"] <= spot)].copy()
 
     call_gamma = (
         calls.groupby("strike")["gamma_exposure"]
@@ -857,24 +836,22 @@ def get_gamma_levels(chain_df, spot):
     }
 
 
-def load_expiration_flow(symbol, strike_width=None):
+def load_expiration_flow(symbol, width=None, exp_count=None):
+    width = width if width is not None else CHAIN_WIDTH_DEFAULTS.get(symbol.upper(), 100)
+    exp_count = exp_count if exp_count is not None else expiration_count
+
     spot = get_price(symbol)
-    width = strike_width if strike_width is not None else chain_width
     expirations = get_expirations(symbol)
 
     today_exp = expirations[0]
-    selected_expirations = expirations[:all_exp_count]
+    selected_expirations = expirations[:exp_count]
 
     chains = []
 
     zero_dte_chain = get_option_chain(symbol, today_exp)
 
     if zero_dte_chain is not None and not zero_dte_chain.empty:
-        zero_dte_chain = filter_near_spot(
-            zero_dte_chain,
-            spot,
-            width,
-        )
+        zero_dte_chain = filter_near_spot(zero_dte_chain, spot, width)
 
     for exp in selected_expirations:
         temp = get_option_chain(symbol, exp)
@@ -885,11 +862,7 @@ def load_expiration_flow(symbol, strike_width=None):
 
     if chains:
         all_chain = pd.concat(chains, ignore_index=True)
-        all_chain = filter_near_spot(
-            all_chain,
-            spot,
-            width,
-        )
+        all_chain = filter_near_spot(all_chain, spot, width)
     else:
         all_chain = pd.DataFrame()
 
@@ -907,10 +880,10 @@ def load_expiration_flow(symbol, strike_width=None):
         "gamma_levels": gamma_levels,
     }
 
+# ============================================================
+# SESSION HISTORY
+# ============================================================
 
-# =========================================================
-# SESSION FILE HISTORY FOR DISCORD-STYLE CHART
-# =========================================================
 SESSION_DIR = Path(__file__).parent / "expiration_flow_history"
 SESSION_DIR.mkdir(exist_ok=True)
 
@@ -921,11 +894,12 @@ def session_file(symbol):
 
 def reset_symbol_history(symbol):
     file_path = session_file(symbol)
+
     if file_path.exists():
         file_path.unlink()
 
 
-def append_exp_snapshot(flow_data):
+def append_snapshot(flow_data):
     file_path = session_file(flow_data["symbol"])
 
     now = datetime.now(CENTRAL_TZ)
@@ -953,11 +927,7 @@ def append_exp_snapshot(flow_data):
     else:
         df = pd.DataFrame()
 
-    df = pd.concat(
-        [df, pd.DataFrame([row])],
-        ignore_index=True,
-    )
-
+    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
     df.to_csv(file_path, index=False)
 
     return df
@@ -996,7 +966,7 @@ def build_chart_df(history_df):
     df = (
         df.set_index("datetime")
         .sort_index()
-        .resample(f"{chart_bucket}min")
+        .resample(f"{bucket_minutes}min")
         .agg(
             {
                 "spot": "last",
@@ -1009,49 +979,30 @@ def build_chart_df(history_df):
     )
 
     for col in ["spot", "zero_dte_net_premium", "all_exp_net_premium"]:
-        df[col] = pd.to_numeric(
-            df.get(col, 0),
-            errors="coerce",
-        ).ffill().fillna(0)
+        df[col] = pd.to_numeric(df.get(col, 0), errors="coerce").ffill().fillna(0)
 
     df["zero_dte_flow"] = df["zero_dte_net_premium"].diff().fillna(0).cumsum()
     df["all_exp_flow"] = df["all_exp_net_premium"].diff().fillna(0).cumsum()
-    df["time"] = pd.to_datetime(df["datetime"]).dt.strftime("%I:%M:%S %p")
+    df["zero_flow_change"] = df["zero_dte_flow"].diff().fillna(0)
+    df["all_flow_change"] = df["all_exp_flow"].diff().fillna(0)
+    df["time"] = pd.to_datetime(df["datetime"]).dt.strftime("%H:%M:%S")
 
     return df
 
+# ============================================================
+# CHART
+# ============================================================
 
-def add_right_edge_label(fig, x, y, text, bg, yref="y", xshift=10):
-    fig.add_annotation(
-        x=x,
-        y=y,
-        text=f"<b>{text}</b>",
-        showarrow=False,
-        font=dict(color="black", size=12, family="Arial Black"),
-        bgcolor=bg,
-        bordercolor=bg,
-        borderwidth=1,
-        borderpad=3,
-        xanchor="left",
-        yanchor="middle",
-        xshift=xshift,
-        yref=yref,
-    )
-
-
-# =========================================================
-# CHART BUILDER - DISCORD STYLE
-# =========================================================
-def sg2_flow_chart(history_df, symbol, flow_data):
+def flow_comparison_chart(history_df, symbol, flow_data):
     df = build_chart_df(history_df)
 
     if df.empty:
         fig = go.Figure()
         fig.update_layout(
             title=f"No flow history yet for {symbol}",
-            height=560,
-            paper_bgcolor="#111923",
-            plot_bgcolor="#252a2f",
+            height=720,
+            paper_bgcolor="#202326",
+            plot_bgcolor="#2b2f33",
             font=dict(color="white"),
         )
         return fig
@@ -1060,6 +1011,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
 
     fig = go.Figure()
 
+    # Price trace on right axis.
     fig.add_trace(
         go.Scatter(
             x=df["time"],
@@ -1071,6 +1023,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
         )
     )
 
+    # Flow traces on left axis.
     fig.add_trace(
         go.Scatter(
             x=df["time"],
@@ -1093,30 +1046,6 @@ def sg2_flow_chart(history_df, symbol, flow_data):
         )
     )
 
-    if show_signed_delta_line:
-        try:
-            signed_snapshot = get_flow_snapshot(
-                symbol=symbol,
-                all_exp_count=all_exp_count,
-                chart_bucket=chart_bucket,
-                lookback_hours=lookback_hours,
-                strike_width=chain_width,
-            )
-            signed_delta_value = safe_get(signed_snapshot, "odte_signed_delta", 0)
-            df["signed_delta"] = float(signed_delta_value)
-            fig.add_trace(
-                go.Scatter(
-                    x=df["time"],
-                    y=df["signed_delta"],
-                    mode="lines",
-                    name="Signed Delta",
-                    line=dict(color="#00e5ff", width=1.5, dash="dot"),
-                    yaxis="y",
-                )
-            )
-        except Exception:
-            pass
-
     gamma_levels = flow_data.get("gamma_levels", {}) or {}
 
     call_gamma_level = gamma_levels.get("top_call_gamma")
@@ -1137,9 +1066,9 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             y=call_gamma_level,
             line=dict(color="#22c55e", width=3, dash="dash"),
             yref="y2",
-            annotation_text=f"Call Gamma {fmt_price(call_gamma_level)}",
+            annotation_text=f"Call Gamma {fmt(call_gamma_level)}",
             annotation_position="top left",
-            annotation_font=dict(color="#22c55e", size=12, family="Arial Black"),
+            annotation_font=dict(color="#22c55e", size=13, family="Arial Black"),
             annotation_bgcolor="rgba(0,0,0,0.70)",
         )
 
@@ -1148,9 +1077,9 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             y=put_gamma_level,
             line=dict(color="#ef4444", width=3, dash="dash"),
             yref="y2",
-            annotation_text=f"Put Gamma {fmt_price(put_gamma_level)}",
+            annotation_text=f"Put Gamma {fmt(put_gamma_level)}",
             annotation_position="bottom left",
-            annotation_font=dict(color="#ef4444", size=12, family="Arial Black"),
+            annotation_font=dict(color="#ef4444", size=13, family="Arial Black"),
             annotation_bgcolor="rgba(0,0,0,0.70)",
         )
 
@@ -1188,12 +1117,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
                 y=zero_bull["zero_dte_flow"],
                 mode="markers+text",
                 name="0DTE Bull FLOW",
-                marker=dict(
-                    size=18,
-                    color="#22c55e",
-                    symbol="circle",
-                    line=dict(color="white", width=2),
-                ),
+                marker=dict(size=18, color="#22c55e", symbol="circle", line=dict(color="white", width=2)),
                 text=["FLOW"] * len(zero_bull),
                 textposition="top center",
                 textfont=dict(color="white", size=11, family="Arial Black"),
@@ -1207,12 +1131,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
                 y=zero_bear["zero_dte_flow"],
                 mode="markers+text",
                 name="0DTE Bear FLOW",
-                marker=dict(
-                    size=18,
-                    color="#ef4444",
-                    symbol="circle",
-                    line=dict(color="white", width=2),
-                ),
+                marker=dict(size=18, color="#ef4444", symbol="circle", line=dict(color="white", width=2)),
                 text=["FLOW"] * len(zero_bear),
                 textposition="bottom center",
                 textfont=dict(color="white", size=11, family="Arial Black"),
@@ -1226,12 +1145,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
                 y=all_bull["all_exp_flow"],
                 mode="markers+text",
                 name="All Exp Bull FLOW",
-                marker=dict(
-                    size=16,
-                    color="#facc15",
-                    symbol="diamond",
-                    line=dict(color="white", width=2),
-                ),
+                marker=dict(size=15, color="#facc15", symbol="diamond", line=dict(color="white", width=2)),
                 text=["FLOW"] * len(all_bull),
                 textposition="top center",
                 textfont=dict(color="white", size=10, family="Arial Black"),
@@ -1245,12 +1159,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
                 y=all_bear["all_exp_flow"],
                 mode="markers+text",
                 name="All Exp Bear FLOW",
-                marker=dict(
-                    size=16,
-                    color="#f97316",
-                    symbol="diamond",
-                    line=dict(color="white", width=2),
-                ),
+                marker=dict(size=15, color="#f97316", symbol="diamond", line=dict(color="white", width=2)),
                 text=["FLOW"] * len(all_bear),
                 textposition="bottom center",
                 textfont=dict(color="white", size=10, family="Arial Black"),
@@ -1258,11 +1167,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             )
         )
 
-    fig.add_hline(
-        y=0,
-        line=dict(color="white", width=2, dash="solid"),
-        yref="y",
-    )
+    fig.add_hline(y=0, line=dict(color="white", width=2, dash="solid"), yref="y")
 
     latest_all = df["all_exp_flow"].iloc[-1]
     latest_zero = df["zero_dte_flow"].iloc[-1]
@@ -1270,33 +1175,49 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     latest_time = str(df["time"].iloc[-1])
 
     if show_right_labels:
-        add_right_edge_label(
-            fig,
-            latest_time,
-            latest_all,
-            fmt_money(latest_all),
-            "#ffe100",
+        fig.add_annotation(
+            x=latest_time,
+            y=latest_all,
+            text=f"<b>{money_fmt(latest_all)}</b>",
+            showarrow=False,
+            xanchor="left",
+            xshift=10,
+            font=dict(color="#ffe100", size=14, family="Arial Black"),
+            bgcolor="rgba(0,0,0,0.70)",
+            bordercolor="#ffe100",
+            borderwidth=1,
             yref="y",
         )
 
-        add_right_edge_label(
-            fig,
-            latest_time,
-            latest_zero,
-            fmt_money(latest_zero),
-            "#00ff38",
+        fig.add_annotation(
+            x=latest_time,
+            y=latest_zero,
+            text=f"<b>{money_fmt(latest_zero)}</b>",
+            showarrow=False,
+            xanchor="left",
+            xshift=10,
+            font=dict(color="#00ff38", size=14, family="Arial Black"),
+            bgcolor="rgba(0,0,0,0.70)",
+            bordercolor="#00ff38",
+            borderwidth=1,
             yref="y",
         )
 
-        add_right_edge_label(
-            fig,
-            latest_time,
-            latest_spot,
-            fmt_price(latest_spot),
-            "#ffffff",
+        fig.add_annotation(
+            x=latest_time,
+            y=latest_spot,
+            text=f"<b>{fmt(latest_spot)}</b>",
+            showarrow=False,
+            xanchor="left",
+            xshift=10,
+            font=dict(color="#ffffff", size=13, family="Arial Black"),
+            bgcolor="rgba(0,0,0,0.70)",
+            bordercolor="#ffffff",
+            borderwidth=1,
             yref="y2",
         )
 
+    # Separate flow and price scaling.
     flow_min = min(df["all_exp_flow"].min(), df["zero_dte_flow"].min(), 0)
     flow_max = max(df["all_exp_flow"].max(), df["zero_dte_flow"].max(), 0)
 
@@ -1307,82 +1228,85 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     flow_pad = flow_span * 0.18
     flow_range = [flow_min - flow_pad, flow_max + flow_pad]
 
-    # =========================================================
-    # TIGHT PRICE AXIS SCALING
-    # =========================================================
-    # Keep the right-side price axis focused on price + the two gamma levels.
-    # This prevents the price line from looking compressed while still showing
-    # Call Gamma / Put Gamma cleanly on the chart.
-    spot_min = float(df["spot"].min())
-    spot_max = float(df["spot"].max())
+    price_min = df["spot"].min()
+    price_max = df["spot"].max()
 
-    price_candidates = [spot_min, spot_max]
+    for gamma_key in ["top_call_gamma", "top_put_gamma"]:
+        try:
+            gamma_value = gamma_levels.get(gamma_key)
+            if gamma_value:
+                gamma_value = float(gamma_value)
+                price_min = min(price_min, gamma_value)
+                price_max = max(price_max, gamma_value)
+        except Exception:
+            pass
 
-    if call_gamma_level is not None:
-        price_candidates.append(float(call_gamma_level))
-
-    if put_gamma_level is not None:
-        price_candidates.append(float(put_gamma_level))
-
-    price_min = min(price_candidates)
-    price_max = max(price_candidates)
     price_span = price_max - price_min
 
-    # Fallback when price is flat or only one print exists.
     if price_span <= 0:
         if symbol.upper() == "SPX":
-            price_span = 8
+            price_span = 10
         elif symbol.upper() == "QQQ":
-            price_span = 2
-        else:  # SPY
-            price_span = 1.5
+            price_span = 1
+        else:
+            price_span = 0.75
 
-        center = float(latest_spot) if latest_spot else (price_min + price_max) / 2
-        price_min = center - price_span / 2
-        price_max = center + price_span / 2
-
-    # Tight padding: enough breathing room without wasting chart space.
-    price_pad = price_span * 0.10
+    price_pad = price_span * 0.35
     price_range = [price_min - price_pad, price_max + price_pad]
 
-    # Better tick spacing by symbol.
     if symbol.upper() == "SPX":
-        price_dtick = 2.5
+        price_dtick = 5
     elif symbol.upper() in ["SPY", "QQQ"]:
         price_dtick = 0.5
     else:
         price_dtick = 1
 
+    flow_update_text = (
+        f"0DTE Flow: {money_fmt(latest_zero)} | "
+        f"All Exp Flow: {money_fmt(latest_all)}"
+    )
+
+    fig.add_annotation(
+        xref="paper",
+        yref="paper",
+        x=0.01,
+        y=1.06,
+        text=f"<b>{flow_update_text}</b>",
+        showarrow=False,
+        align="left",
+        font=dict(color="#facc15", size=13, family="Arial Black"),
+        bgcolor="rgba(0,0,0,0.55)",
+        bordercolor="rgba(250,204,21,0.55)",
+        borderwidth=1,
+    )
+
     fig.update_layout(
         title=dict(
             text=(
-                f"<b>{symbol} Flow Trend | {chart_bucket}-Min Bars</b><br>"
+                f"<b>{symbol} Flow Trend | {bucket_minutes}-Min Bars</b><br>"
                 f"<span style='font-size:14px;'>"
                 f"0DTE Exp: {flow_data['today_exp']} | "
                 f"All Exp Used: {len(flow_data['expirations_used'])} | "
-                f"Spot: {fmt_price(flow_data['spot'])}"
+                f"Spot: {fmt(flow_data['spot'])}"
                 f"</span>"
             ),
             x=0.01,
             xanchor="left",
             font=dict(size=20, color="white"),
         ),
-        height=540,
-        paper_bgcolor="#111923",
-        plot_bgcolor="#252a2f",
+        height=690,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#2b2f33",
         font=dict(color="white", size=13),
         xaxis=dict(
             showgrid=True,
             gridcolor="rgba(255,255,255,0.16)",
-            tickfont=dict(color="white", size=11, family="Arial Black"),
+            tickfont=dict(color="white", size=12, family="Arial Black"),
             nticks=18,
             type="category",
         ),
         yaxis=dict(
-            title=dict(
-                text="Premium Flow",
-                font=dict(color="#facc15", size=14),
-            ),
+            title=dict(text="Flow Premium", font=dict(color="#facc15", size=14)),
             side="left",
             range=flow_range,
             showgrid=True,
@@ -1393,10 +1317,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             tickfont=dict(color="#facc15", size=13, family="Arial Black"),
         ),
         yaxis2=dict(
-            title=dict(
-                text=f"{symbol} Price",
-                font=dict(color="#ffffff", size=14),
-            ),
+            title=dict(text=f"{symbol} Price", font=dict(color="#ffffff", size=14)),
             overlaying="y",
             side="right",
             range=price_range,
@@ -1407,20 +1328,113 @@ def sg2_flow_chart(history_df, symbol, flow_data):
         legend=dict(
             orientation="h",
             x=0.01,
-            y=-0.24,
+            y=-0.13,
             bgcolor="rgba(0,0,0,0.25)",
-            font=dict(color="white", size=12, family="Arial Black"),
+            font=dict(color="white", size=11, family="Arial Black"),
         ),
-        margin=dict(l=75, r=105, t=80, b=95),
+        margin=dict(l=75, r=105, t=90, b=80),
         hovermode="x unified",
     )
 
     return fig
 
+# ============================================================
+# MATRIX
+# ============================================================
 
-# =========================================================
+def matrix_statuses(sym, data, history_df):
+    chart_df = build_chart_df(history_df)
+
+    odte_net = safe_float(data["zero_dte"]["net_premium"])
+    all_net = safe_float(data["all_exp"]["net_premium"])
+    spot = safe_float(data["spot"])
+
+    flow_threshold = FLOW_DOT_DEFAULTS.get(sym.upper(), 25_000_000)
+    div_threshold = DIVERGENCE_DEFAULTS.get(sym.upper(), 10_000_000)
+    pulse_threshold_local = PULSE_DEFAULTS.get(sym.upper(), 25_000_000)
+
+    flow_status = status_from_value(odte_net, flow_threshold)
+
+    divergence_value = odte_net - all_net
+    div_status = status_from_value(divergence_value, div_threshold)
+
+    gamma_levels = data.get("gamma_levels", {}) or {}
+    call_gamma = gamma_levels.get("top_call_gamma")
+    put_gamma = gamma_levels.get("top_put_gamma")
+
+    gamma_status = "neutral"
+    try:
+        call_gamma = float(call_gamma) if call_gamma else None
+        put_gamma = float(put_gamma) if put_gamma else None
+
+        if call_gamma and spot > call_gamma:
+            gamma_status = "bull"
+        elif put_gamma and spot < put_gamma:
+            gamma_status = "bear"
+        elif call_gamma and put_gamma:
+            mid = (call_gamma + put_gamma) / 2
+            gamma_status = "bull" if spot >= mid else "bear"
+    except Exception:
+        gamma_status = "neutral"
+
+    pulse_status = "neutral"
+    if chart_df is not None and not chart_df.empty and len(chart_df) >= 2:
+        pulse_value = safe_float(chart_df["zero_flow_change"].iloc[-1])
+        pulse_status = status_from_value(pulse_value, pulse_threshold_local)
+
+    return {
+        "Flow": flow_status,
+        "Div": div_status,
+        "Gamma": gamma_status,
+        "Pulse": pulse_status,
+    }
+
+
+def build_matrix_html(matrix_data):
+    rows_html = []
+
+    for sym in SYMBOLS:
+        data = matrix_data.get(sym, {})
+        statuses = data.get("statuses", {})
+
+        rows_html.append(
+            f"""
+            <tr>
+                <td><span class="symbol-cell">{SYMBOL_ICONS.get(sym, '')} &nbsp; {sym}</span></td>
+                <td>{dot_html(statuses.get("Flow", "neutral"))}</td>
+                <td>{dot_html(statuses.get("Div", "neutral"))}</td>
+                <td>{dot_html(statuses.get("Gamma", "neutral"))}</td>
+                <td>{dot_html(statuses.get("Pulse", "neutral"))}</td>
+            </tr>
+            """
+        )
+
+    return f"""
+    <div class="matrix-card">
+        <div class="matrix-title">🧠 SG² FLOW DASHBOARD</div>
+        <div class="sg2-dot-matrix">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Flow</th>
+                        <th>Div</th>
+                        <th>Gamma</th>
+                        <th>Pulse</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {''.join(rows_html)}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    """
+
+# ============================================================
 # TOP SYMBOL BUTTONS
-# =========================================================
+# ============================================================
+
 symbol_cols = st.columns(len(SYMBOLS))
 
 for i, sym in enumerate(SYMBOLS):
@@ -1438,322 +1452,112 @@ for i, sym in enumerate(SYMBOLS):
             st.rerun()
 
 symbol = st.session_state.selected_symbol
-icon = SYMBOL_ICONS.get(symbol, "📊")
 
-
-# =========================================================
-# ACTIVE BAR
-# =========================================================
-st.markdown(
-    f"""
-    <div class="active-bar">
-        ACTIVE: &nbsp; {icon} &nbsp; {symbol}
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-# =========================================================
+# ============================================================
 # RESET HISTORY
-# =========================================================
-if reset_exp_history:
+# ============================================================
+
+if reset_history:
     reset_symbol_history(symbol)
     st.success(f"{symbol} flow chart history reset.")
 
+# ============================================================
+# LOAD DATA
+# ============================================================
 
-# =========================================================
-# LOAD SG2 SNAPSHOT FOR METRICS / MATRIX
-# =========================================================
 try:
-    snapshot = get_flow_snapshot(
-        symbol=symbol,
-        all_exp_count=all_exp_count,
-        chart_bucket=chart_bucket,
-        lookback_hours=lookback_hours,
-        strike_width=chain_width,
-    )
+    flow_data = load_expiration_flow(symbol, width=chain_width, exp_count=expiration_count)
+    history_df = append_snapshot(flow_data)
 except Exception as e:
-    st.warning(f"Could not load SG² metric snapshot for {symbol}: {e}")
-    snapshot = {}
-
-
-# =========================================================
-# LOAD EXPIRATION FLOW FOR MAIN CHART
-# =========================================================
-try:
-    exp_flow_data = load_expiration_flow(symbol)
-    exp_history_df = append_exp_snapshot(exp_flow_data)
-except Exception as e:
-    st.error(f"Could not load expiration flow chart data for {symbol}: {e}")
+    st.error(f"Failed to load expiration flow for {symbol}")
+    st.exception(e)
     st.stop()
 
+gamma_levels = flow_data.get("gamma_levels", {}) or {}
+latest_zero = flow_data["zero_dte"]["net_premium"]
+latest_all = flow_data["all_exp"]["net_premium"]
 
-spot = safe_get(snapshot, "spot", exp_flow_data.get("spot", 0))
-odte_exp = safe_get(snapshot, "odte_exp", exp_flow_data.get("today_exp", ""))
+# ============================================================
+# TOP SUMMARY CARD
+# ============================================================
 
-odte_premium_net = exp_flow_data["zero_dte"]["net_premium"]
-all_exp_premium_net = exp_flow_data["all_exp"]["net_premium"]
-
-odte_signed_delta = safe_get(snapshot, "odte_signed_delta", 0)
-odte_delta_bias = safe_get(snapshot, "odte_delta_bias", "NEUTRAL")
-all_exp_delta_bias = safe_get(snapshot, "all_exp_delta_bias", "NEUTRAL")
-
-gamma_levels = exp_flow_data.get("gamma_levels", {})
-call_gamma = gamma_levels.get("top_call_gamma") or safe_get(snapshot, "call_gamma", 0)
-put_gamma = gamma_levels.get("top_put_gamma") or safe_get(snapshot, "put_gamma", 0)
-gamma_regime = safe_get(snapshot, "gamma_regime", "NEUTRAL")
-
-odte_rows = exp_flow_data["zero_dte"]["rows"]
-all_exp_rows = exp_flow_data["all_exp"]["rows"]
-
-
-# =========================================================
-# VOLUME STATS
-# =========================================================
-chain_df = safe_get(snapshot, "chain_df", pd.DataFrame())
-
-if isinstance(chain_df, pd.DataFrame) and not chain_df.empty and "volume" in chain_df.columns:
-    try:
-        calls = chain_df[chain_df["type"] == "call"]
-        puts = chain_df[chain_df["type"] == "put"]
-        call_volume = calls["volume"].sum()
-        put_volume = puts["volume"].sum()
-        total_volume = call_volume + put_volume
-        pc_ratio = put_volume / call_volume if call_volume > 0 else 0
-    except Exception:
-        call_volume, put_volume, total_volume, pc_ratio = 0, 0, 0, 0
-else:
-    call_volume, put_volume, total_volume, pc_ratio = 0, 0, 0, 0
-
-
-# =========================================================
-# METRICS
-# =========================================================
-st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-
-r1 = st.columns(5)
-
-r1[0].markdown(metric_html("Spot", f"{spot:.2f}"), unsafe_allow_html=True)
-
-r1[1].markdown(
-    metric_html(
-        "0DTE Premium Net",
-        fmt_money(odte_premium_net),
-        color_class(odte_premium_net),
-    ),
-    unsafe_allow_html=True,
-)
-
-r1[2].markdown(
-    metric_html(
-        "All Exp Premium Net",
-        fmt_money(all_exp_premium_net),
-        color_class(all_exp_premium_net),
-    ),
-    unsafe_allow_html=True,
-)
-
-r1[3].markdown(
-    metric_html("Call Gamma", fmt_price(call_gamma), "green-text"),
-    unsafe_allow_html=True,
-)
-
-r1[4].markdown(
-    metric_html("Put Gamma", fmt_price(put_gamma), "red-text"),
-    unsafe_allow_html=True,
-)
-
-st.markdown("<hr>", unsafe_allow_html=True)
-
-r2 = st.columns(10)
-
-r2[0].markdown(
-    metric_html(
-        "0DTE Signed Delta",
-        fmt_money(odte_signed_delta),
-        color_class(odte_signed_delta),
-    ),
-    unsafe_allow_html=True,
-)
-
-r2[1].markdown(
-    metric_html(
-        "0DTE Delta Bias",
-        odte_delta_bias,
-        "red-text" if "BEAR" in str(odte_delta_bias) else "green-text",
-    ),
-    unsafe_allow_html=True,
-)
-
-r2[2].markdown(
-    metric_html(
-        "All Exp Delta Bias",
-        all_exp_delta_bias,
-        "red-text" if "BEAR" in str(all_exp_delta_bias) else "green-text",
-    ),
-    unsafe_allow_html=True,
-)
-
-r2[3].markdown(
-    metric_html(
-        "Gamma Regime",
-        gamma_regime,
-        "green-text" if "ABOVE" in str(gamma_regime) else "red-text",
-    ),
-    unsafe_allow_html=True,
-)
-
-r2[4].markdown(metric_html("0DTE Rows", odte_rows), unsafe_allow_html=True)
-r2[5].markdown(metric_html("All Exp Rows", all_exp_rows), unsafe_allow_html=True)
-
-r2[6].markdown(
-    metric_html("Call Vol", fmt_num(call_volume), "green-text"),
-    unsafe_allow_html=True,
-)
-
-r2[7].markdown(
-    metric_html("Put Vol", fmt_num(put_volume), "red-text"),
-    unsafe_allow_html=True,
-)
-
-r2[8].markdown(
-    metric_html("Total Vol", fmt_num(total_volume)),
-    unsafe_allow_html=True,
-)
-
-r2[9].markdown(
-    metric_html("P/C Ratio", f"{pc_ratio:.2f}", "yellow-text"),
-    unsafe_allow_html=True,
-)
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-
-# =========================================================
-# HEADER
-# =========================================================
 today_txt = datetime.now(CENTRAL_TZ).strftime("%A, %B %d, %Y")
 
-header_html = f"""
-<div class="header-card">
-    <div style="font-size:25px;font-weight:900;color:white;">
-        {symbol} {today_txt}
-    </div>
-    <div style="font-size:15px;font-weight:800;color:white;margin-top:8px;">
-        Spot: <span class="green-text">{spot:.2f}</span>
+top_html = f"""
+<div class="top-card">
+    <div class="top-title">{symbol} {today_txt}</div>
+    <div class="top-line">
+        Spot: <span class="green-text">{fmt(flow_data["spot"])}</span>
         &nbsp;&nbsp; | &nbsp;&nbsp;
-        0DTE Exp: <span class="yellow-text">{odte_exp}</span>
+        0DTE Exp: <span class="yellow-text">{flow_data["today_exp"]}</span>
         &nbsp;&nbsp; | &nbsp;&nbsp;
-        <span class="yellow-text">0DTE Flow:</span> {fmt_money(odte_premium_net)}
+        <span class="yellow-text">0DTE Flow:</span> {money_fmt(latest_zero)}
         &nbsp;&nbsp; | &nbsp;&nbsp;
-        <span class="cyan-text">Signed Delta:</span> {fmt_money(odte_signed_delta)}
+        <span class="cyan-text">Signed Delta:</span> {money_fmt(latest_zero)}
         &nbsp;&nbsp; | &nbsp;&nbsp;
-        All Exp Used: {all_exp_count}
+        All Exp Used: <span class="green-text">{len(flow_data["expirations_used"])}</span>
         &nbsp;&nbsp; | &nbsp;&nbsp;
-        <span class="yellow-text">All Exp Flow:</span> {fmt_money(all_exp_premium_net)}
+        <span class="yellow-text">All Exp Flow:</span> {money_fmt(latest_all)}
     </div>
 </div>
 """
 
-st.markdown(header_html, unsafe_allow_html=True)
+st.markdown(top_html, unsafe_allow_html=True)
 
+# ============================================================
+# LOAD MATRIX DATA
+# ============================================================
 
-# =========================================================
-# CHART + MATRIX
-# =========================================================
-left_chart, right_matrix = st.columns([2.7, 1.5])
+matrix_data = {}
 
+for sym in SYMBOLS:
+    try:
+        if sym == symbol:
+            sym_flow_data = flow_data
+            sym_history_df = history_df
+        else:
+            sym_flow_data = load_expiration_flow(
+                sym,
+                width=CHAIN_WIDTH_DEFAULTS.get(sym.upper(), 100),
+                exp_count=expiration_count,
+            )
+            sym_history_df = append_snapshot(sym_flow_data)
 
-# =========================================================
-# MAIN FLOW CHART
-# =========================================================
+        matrix_data[sym] = {
+            "flow_data": sym_flow_data,
+            "history_df": sym_history_df,
+            "statuses": matrix_statuses(sym, sym_flow_data, sym_history_df),
+        }
+
+    except Exception as e:
+        matrix_data[sym] = {
+            "flow_data": {},
+            "history_df": pd.DataFrame(),
+            "statuses": {
+                "Flow": "neutral",
+                "Div": "neutral",
+                "Gamma": "neutral",
+                "Pulse": "neutral",
+            },
+        }
+        st.warning(f"{sym} matrix load failed: {e}")
+
+# ============================================================
+# MAIN LAYOUT
+# ============================================================
+
+left_chart, right_matrix = st.columns([2.75, 1.05])
+
 with left_chart:
+    st.markdown('<div class="chart-card">', unsafe_allow_html=True)
     st.plotly_chart(
-        sg2_flow_chart(
-            exp_history_df,
-            symbol,
-            exp_flow_data,
-        ),
+        flow_comparison_chart(history_df, symbol, flow_data),
         use_container_width=True,
         config={"displayModeBar": False},
     )
+    st.markdown("</div>", unsafe_allow_html=True)
 
-
-# =========================================================
-# MATRIX
-# =========================================================
 with right_matrix:
-    if show_matrix:
-        st.markdown('<div class="matrix-card">', unsafe_allow_html=True)
+    st.markdown(build_matrix_html(matrix_data), unsafe_allow_html=True)
 
-        st.markdown(
-            '<div class="matrix-title">🧠 SG² MATRIX</div>',
-            unsafe_allow_html=True,
-        )
-
-        rows = []
-
-        for sym in SYMBOLS:
-            try:
-                # Use the same expiration-flow engine that powers the chart.
-                # This avoids blank matrix cells when flow_engine.get_flow_snapshot()
-                # does not return the old matrix keys.
-                sym_width = CHAIN_WIDTH_DEFAULTS.get(sym, 100)
-                sym_flow = exp_flow_data if sym == symbol else load_expiration_flow(sym, strike_width=sym_width)
-
-                sym_spot = sym_flow.get("spot", 0)
-                sym_zero_net = sym_flow.get("zero_dte", {}).get("net_premium", 0)
-                sym_all_net = sym_flow.get("all_exp", {}).get("net_premium", 0)
-                sym_call_gamma = sym_flow.get("gamma_levels", {}).get("top_call_gamma")
-                sym_put_gamma = sym_flow.get("gamma_levels", {}).get("top_put_gamma")
-
-                flow_status = status_from_value(sym_zero_net)
-                all_status = status_from_value(sym_all_net)
-
-                rows.append(
-                    {
-                        "Symbol": f"{SYMBOL_ICONS.get(sym, '')} {sym}",
-                        "Spot": fmt_price(sym_spot),
-                        "0DTE Flow": f"<span class='{color_class(sym_zero_net)}'>{fmt_money(sym_zero_net)}</span>",
-                        "All Exp Flow": f"<span class='{color_class(sym_all_net)}'>{fmt_money(sym_all_net)}</span>",
-                        "Flow Bias": dot_from_status(flow_status),
-                        "All Bias": dot_from_status(all_status),
-                        "Call Gamma": f"<span class='green-text'>{fmt_price(sym_call_gamma)}</span>",
-                        "Put Gamma": f"<span class='red-text'>{fmt_price(sym_put_gamma)}</span>",
-                    }
-                )
-
-            except Exception as e:
-                rows.append(
-                    {
-                        "Symbol": f"{SYMBOL_ICONS.get(sym, '')} {sym}",
-                        "Spot": "—",
-                        "0DTE Flow": "—",
-                        "All Exp Flow": "—",
-                        "Flow Bias": "⚠️",
-                        "All Bias": "⚠️",
-                        "Call Gamma": "—",
-                        "Put Gamma": "—",
-                    }
-                )
-                st.caption(f"{sym} matrix load failed: {e}")
-
-        matrix_df = pd.DataFrame(rows)
-        matrix_html = matrix_df.to_html(index=False, escape=False)
-
-        st.markdown(
-            f"""
-            <div class="sg2-matrix">
-                {matrix_html}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-
-st.caption(
-    "All values are real-time estimates. Not financial advice. Data may be delayed."
-)
+st.caption("All values are real-time estimates. Not financial advice. Data may be delayed.")
