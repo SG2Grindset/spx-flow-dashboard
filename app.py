@@ -1558,7 +1558,7 @@ with left_chart:
     st.markdown("</div>", unsafe_allow_html=True)
 
 with right_matrix:
-matrix_html = build_matrix_html(matrix_data)
+    matrix_html = build_matrix_html(matrix_data)
 
 st.components.v1.html(
     matrix_html,
