@@ -20,7 +20,7 @@ from flow_engine import get_flow_snapshot
 # PAGE CONFIG
 # =========================================================
 st.set_page_config(
-    page_title="SG2 FLOW Dashboard",
+    page_title="SG² MATRIX",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -120,7 +120,7 @@ def check_password():
     st.markdown(
         """
         <div class="login-box">
-            <div class="login-title">🔐 SG2 FLOW Dashboard</div>
+            <div class="login-title">🔐 SG² MATRIX</div>
             <div class="login-subtitle">Private Access Required</div>
         </div>
         """,
@@ -134,7 +134,7 @@ def check_password():
 
     password = st.text_input("", type="password", label_visibility="collapsed")
 
-    if st.button("ENTER THE FLOW by SG2", use_container_width=True):
+    if st.button("ENTER THE FLOW by SG²", use_container_width=True):
         try:
             correct_password = st.secrets["APP_PASSWORD"]
         except Exception:
@@ -157,46 +157,36 @@ if not check_password():
 # =========================================================
 # SYMBOL CONFIG
 # =========================================================
-SYMBOLS = ["SPX", "SPY", "QQQ", "TSLA", "AAPL"]
+SYMBOLS = ["SPY", "SPX", "QQQ"]
 
 SYMBOL_ICONS = {
-    "SPX": "📈",
     "SPY": "🕷️",
+    "SPX": "📈",
     "QQQ": "📊",
-    "TSLA": "⚡",
-    "AAPL": "🍎",
 }
 
 FLOW_DOT_THRESHOLDS = {
-    "SPX": 150_000_000,
     "SPY": 25_000_000,
+    "SPX": 150_000_000,
     "QQQ": 25_000_000,
-    "TSLA": 75_000_000,
-    "AAPL": 25_000_000,
 }
 
 DIVERGENCE_THRESHOLDS = {
-    "SPX": 30_000_000,
     "SPY": 10_000_000,
+    "SPX": 30_000_000,
     "QQQ": 10_000_000,
-    "TSLA": 20_000_000,
-    "AAPL": 10_000_000,
 }
 
 PULSE_DROP_THRESHOLDS = {
-    "SPX": 100_000_000,
     "SPY": 25_000_000,
+    "SPX": 100_000_000,
     "QQQ": 25_000_000,
-    "TSLA": 75_000_000,
-    "AAPL": 25_000_000,
 }
 
 CHAIN_WIDTH_DEFAULTS = {
-    "SPX": 500,
     "SPY": 100,
+    "SPX": 500,
     "QQQ": 100,
-    "TSLA": 100,
-    "AAPL": 50,
 }
 
 
@@ -438,7 +428,7 @@ with st.sidebar:
 
     st.caption(f"Default for {symbol}: {default_flow_dot_threshold:,}")
 
-    show_matrix = st.checkbox("Show SG2 Flow Matrix", value=True)
+    show_matrix = st.checkbox("Show SG² Matrix", value=True)
 
     divergence_threshold = st.number_input(
         "Divergence Threshold",
@@ -1474,7 +1464,7 @@ try:
         strike_width=chain_width,
     )
 except Exception as e:
-    st.warning(f"Could not load SG2 metric snapshot for {symbol}: {e}")
+    st.warning(f"Could not load SG² metric snapshot for {symbol}: {e}")
     snapshot = {}
 
 
@@ -1688,7 +1678,7 @@ with right_matrix:
         st.markdown('<div class="matrix-card">', unsafe_allow_html=True)
 
         st.markdown(
-            '<div class="matrix-title">🧠 SG2 FLOW DASHBOARD</div>',
+            '<div class="matrix-title">🧠 SG² MATRIX</div>',
             unsafe_allow_html=True,
         )
 
