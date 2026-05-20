@@ -994,9 +994,19 @@ def append_exp_snapshot(flow_data):
         df = pd.DataFrame()
 
     df = pd.concat(
-        [df, pd.DataFrame([row])],
-        ignore_index=True,
-    )
+    [df, pd.DataFrame([row])],
+    ignore_index=True,
+)
+    
+# =========================================================
+# LIMIT HISTORY SIZE
+# Prevents massive CSV files and hard drive fill-up
+# =========================================================
+
+    df = df.tail(1500).copy()
+
+    df.to_csv(file_path, index=False)
+
 
     df.to_csv(file_path, index=False)
 
