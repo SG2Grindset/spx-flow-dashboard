@@ -1368,6 +1368,8 @@ def sg2_flow_chart(history_df, symbol, flow_data):
                 y=zero_bull["zero_dte_flow"],
                 mode="markers+text",
                 name="0DTE Bull FLOW",
+                showlegend=True,
+                visible=True,
                 marker=dict(
                     size=18,
                     color="#22c55e",
@@ -1385,8 +1387,10 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             go.Scatter(
                 x=zero_bear["time"],
                 y=zero_bear["zero_dte_flow"],
-                mode="markers+text",
+                mode="markers+text+lines",
                 name="0DTE Bear FLOW",
+                showlegend=True,
+                visible="legendonly",
                 marker=dict(
                     size=18,
                     color="#ef4444",
@@ -1406,6 +1410,8 @@ def sg2_flow_chart(history_df, symbol, flow_data):
                 y=all_bull["all_exp_flow"],
                 mode="markers+text",
                 name="All Exp Bull FLOW",
+                showlegend=True,
+                visible=True,
                 marker=dict(
                     size=16,
                     color="#facc15",
@@ -1423,8 +1429,10 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             go.Scatter(
                 x=all_bear["time"],
                 y=all_bear["all_exp_flow"],
-                mode="markers+text",
+                mode="markers+text+lines",
                 name="All Exp Bear FLOW",
+                showlegend=True,
+                visible="legendonly",
                 marker=dict(
                     size=16,
                     color="#f97316",
