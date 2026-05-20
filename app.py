@@ -1390,7 +1390,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
                 mode="markers+text+lines",
                 name="0DTE Bear FLOW",
                 showlegend=True,
-                visible="legendonly",
+                visible="true",
                 marker=dict(
                     size=18,
                     color="#ef4444",
@@ -1432,7 +1432,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
                 mode="markers+text+lines",
                 name="All Exp Bear FLOW",
                 showlegend=True,
-                visible="legendonly",
+                visible=true,
                 marker=dict(
                     size=16,
                     color="#f97316",
