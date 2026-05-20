@@ -437,23 +437,8 @@ with st.sidebar:
 
     st.caption(f"Default for {symbol}: {default_flow_dot_threshold:,}")
 
-    show_matrix = st.checkbox("Show SG² Matrix", value=True)
 
-    divergence_threshold = st.number_input(
-        "Divergence Threshold",
-        min_value=0,
-        value=DIVERGENCE_THRESHOLDS.get(symbol, 10_000_000),
-        step=1_000_000,
-        key=f"divergence_threshold_{symbol}",
-    )
 
-    pulse_drop_threshold = st.number_input(
-        "Pulse/Drop Threshold",
-        min_value=0,
-        value=PULSE_DROP_THRESHOLDS.get(symbol, 25_000_000),
-        step=1_000_000,
-        key=f"pulse_drop_threshold_{symbol}",
-    )
 
     strike_count_each_side = STRIKE_COUNT_DEFAULTS.get(symbol, 5)
 
@@ -994,19 +979,12 @@ def append_exp_snapshot(flow_data):
         df = pd.DataFrame()
 
     df = pd.concat(
-    [df, pd.DataFrame([row])],
-    ignore_index=True,
-)
-    
-# =========================================================
-# LIMIT HISTORY SIZE
-# Prevents massive CSV files and hard drive fill-up
-# =========================================================
+        [df, pd.DataFrame([row])],
+        ignore_index=True,
+    )
 
+    # Keep only recent rows so the history CSV does not grow forever.
     df = df.tail(1500).copy()
-
-    df.to_csv(file_path, index=False)
-
 
     df.to_csv(file_path, index=False)
 
@@ -1503,8 +1481,9 @@ if reset_exp_history:
     st.success(f"{symbol} flow chart history reset.")
 
 
+
 # =========================================================
-# LOAD SG2 SNAPSHOT FOR METRICS / MATRIX
+# LOAD SG² SNAPSHOT FOR METRICS
 # =========================================================
 try:
     snapshot = get_flow_snapshot(
@@ -1512,7 +1491,7 @@ try:
         all_exp_count=all_exp_count,
         chart_bucket=chart_bucket,
         lookback_hours=lookback_hours,
-        strike_width=CHAIN_WIDTH_DEFAULTS.get(symbol, 100),
+        strike_width=chain_width,
     )
 except Exception as e:
     st.warning(f"Could not load SG² metric snapshot for {symbol}: {e}")
@@ -1550,6 +1529,49 @@ all_exp_rows = exp_flow_data["all_exp"]["rows"]
 
 
 # =========================================================
+# MAIN FLOW CHART - DIRECTLY UNDER ACTIVE BANNER
+# =========================================================
+st.plotly_chart(
+    sg2_flow_chart(
+        exp_history_df,
+        symbol,
+        exp_flow_data,
+    ),
+    use_container_width=True,
+    config={"displayModeBar": False},
+)
+
+
+# =========================================================
+# DETAILS BELOW CHART
+# =========================================================
+today_txt = datetime.now(CENTRAL_TZ).strftime("%A, %B %d, %Y")
+
+header_html = f"""
+<div class="header-card">
+    <div style="font-size:25px;font-weight:900;color:white;">
+        {symbol} {today_txt}
+    </div>
+    <div style="font-size:15px;font-weight:800;color:white;margin-top:8px;">
+        Spot: <span class="green-text">{spot:.2f}</span>
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        0DTE Exp: <span class="yellow-text">{odte_exp}</span>
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="yellow-text">0DTE Flow:</span> {fmt_money(odte_premium_net)}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="cyan-text">Signed Delta:</span> {fmt_money(odte_signed_delta)}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        All Exp Used: {all_exp_count}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="yellow-text">All Exp Flow:</span> {fmt_money(all_exp_premium_net)}
+    </div>
+</div>
+"""
+
+st.markdown(header_html, unsafe_allow_html=True)
+
+
+# =========================================================
 # VOLUME STATS
 # =========================================================
 chain_df = safe_get(snapshot, "chain_df", pd.DataFrame())
@@ -1569,7 +1591,7 @@ else:
 
 
 # =========================================================
-# METRICS
+# METRICS BELOW CHART
 # =========================================================
 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
 
@@ -1669,137 +1691,6 @@ r2[9].markdown(
 )
 
 st.markdown("</div>", unsafe_allow_html=True)
-
-
-# =========================================================
-# HEADER
-# =========================================================
-today_txt = datetime.now(CENTRAL_TZ).strftime("%A, %B %d, %Y")
-
-header_html = f"""
-<div class="header-card">
-    <div style="font-size:25px;font-weight:900;color:white;">
-        {symbol} {today_txt}
-    </div>
-    <div style="font-size:15px;font-weight:800;color:white;margin-top:8px;">
-        Spot: <span class="green-text">{spot:.2f}</span>
-        &nbsp;&nbsp; | &nbsp;&nbsp;
-        0DTE Exp: <span class="yellow-text">{odte_exp}</span>
-        &nbsp;&nbsp; | &nbsp;&nbsp;
-        <span class="yellow-text">0DTE Flow:</span> {fmt_money(odte_premium_net)}
-        &nbsp;&nbsp; | &nbsp;&nbsp;
-        <span class="cyan-text">Signed Delta:</span> {fmt_money(odte_signed_delta)}
-        &nbsp;&nbsp; | &nbsp;&nbsp;
-        All Exp Used: {all_exp_count}
-        &nbsp;&nbsp; | &nbsp;&nbsp;
-        <span class="yellow-text">All Exp Flow:</span> {fmt_money(all_exp_premium_net)}
-    </div>
-</div>
-"""
-
-st.markdown(header_html, unsafe_allow_html=True)
-
-
-# =========================================================
-# CHART + MATRIX
-# =========================================================
-left_chart, right_matrix = st.columns([2.7, 1.5])
-
-
-# =========================================================
-# MAIN FLOW CHART
-# =========================================================
-with left_chart:
-    st.plotly_chart(
-        sg2_flow_chart(
-            exp_history_df,
-            symbol,
-            exp_flow_data,
-        ),
-        use_container_width=True,
-        config={"displayModeBar": False},
-    )
-
-
-# =========================================================
-# MATRIX
-# =========================================================
-with right_matrix:
-    if show_matrix:
-        st.markdown('<div class="matrix-card">', unsafe_allow_html=True)
-
-        st.markdown(
-            '<div class="matrix-title">🧠 SG² MATRIX</div>',
-            unsafe_allow_html=True,
-        )
-
-        rows = []
-
-        for sym in SYMBOLS:
-            try:
-                sym_snapshot = (
-                    snapshot
-                    if sym == symbol
-                    else get_flow_snapshot(
-                        symbol=sym,
-                        all_exp_count=all_exp_count,
-                        chart_bucket=chart_bucket,
-                        lookback_hours=lookback_hours,
-                        strike_width=CHAIN_WIDTH_DEFAULTS.get(sym, 100),
-                    )
-                )
-            except Exception as e:
-                st.warning(f"{sym} matrix load failed: {e}")
-                sym_snapshot = {}
-
-            flow_net = safe_get(sym_snapshot, "odte_premium_net", 0)
-            div_value = safe_get(sym_snapshot, "divergence_value", 0)
-            gamma_value = safe_get(sym_snapshot, "gamma_signal", 0)
-            pulse_value = safe_get(sym_snapshot, "pulse_drop_signal", 0)
-
-            flow_status = status_from_value(
-                1
-                if flow_net >= FLOW_DOT_THRESHOLDS.get(sym, 25_000_000)
-                else -1
-                if flow_net <= -FLOW_DOT_THRESHOLDS.get(sym, 25_000_000)
-                else 0
-            )
-
-            divergence_status = status_from_value(
-                1
-                if div_value >= DIVERGENCE_THRESHOLDS.get(sym, 10_000_000)
-                else -1
-                if div_value <= -DIVERGENCE_THRESHOLDS.get(sym, 10_000_000)
-                else 0
-            )
-
-            gamma_status = status_from_value(gamma_value)
-            pulse_status = status_from_value(pulse_value)
-
-            rows.append(
-                {
-                    "Symbol": f"{SYMBOL_ICONS.get(sym, '')} {sym}",
-                    "Flow": dot_from_status(flow_status),
-                    "Div": dot_from_status(divergence_status),
-                    "Gamma": dot_from_status(gamma_status),
-                    "Pulse": dot_from_status(pulse_status),
-                }
-            )
-
-        matrix_df = pd.DataFrame(rows)
-        matrix_html = matrix_df.to_html(index=False, escape=False)
-
-        st.markdown(
-            f"""
-            <div class="sg2-matrix">
-                {matrix_html}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
 
 st.caption(
     "All values are real-time estimates. Not financial advice. Data may be delayed."
