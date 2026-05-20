@@ -1128,7 +1128,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
                 all_exp_count=all_exp_count,
                 chart_bucket=chart_bucket,
                 lookback_hours=lookback_hours,
-                strike_width=CHAIN_WIDTH_DEFAULTS.get(symbol, 100),
+                strike_width=100,
             )
             signed_delta_value = safe_get(signed_snapshot, "odte_signed_delta", 0)
             df["signed_delta"] = float(signed_delta_value)
@@ -1491,7 +1491,7 @@ try:
         all_exp_count=all_exp_count,
         chart_bucket=chart_bucket,
         lookback_hours=lookback_hours,
-        strike_width=chain_width,
+        strike_width=100,
     )
 except Exception as e:
     st.warning(f"Could not load SG² metric snapshot for {symbol}: {e}")
