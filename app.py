@@ -161,9 +161,9 @@ FLOW_DOT_THRESHOLDS = {
 }
 
 CHAIN_WIDTH_DEFAULTS = {
-    "SPY": 100,
-    "SPX": 500,
-    "QQQ": 100,
+    "SPY": 5,
+    "SPX": 25,
+    "QQQ": 5,
 }
 
 STRIKE_COUNT_DEFAULTS = {
