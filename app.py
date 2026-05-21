@@ -351,6 +351,7 @@ with st.sidebar:
 
     show_flow_dots = st.checkbox("Show FLOW Dots", value=True)
     show_signed_delta_line = st.checkbox("Show Signed Delta Line", value=False)
+    show_delta_notional_lines = st.checkbox("Show Delta Notional Lines", value=False)
     show_right_labels = st.checkbox("Show Right Edge Labels", value=True)
 
     default_flow_dot_threshold = FLOW_DOT_THRESHOLDS.get(symbol, 25_000_000)
@@ -377,6 +378,7 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Chart model: 0DTE and All Expiration net premium flow changes.")
     st.caption("History files are capped at 1,500 rows per symbol.")
+    st.caption("Delta Notional = Delta × Spot × Contracts × 100.")
 
 
 if auto_refresh:
@@ -678,12 +680,15 @@ def filter_near_spot(df, spot, strikes_each_side):
     return temp[temp["strike"].isin(selected_strikes)].copy()
 
 
-def calculate_net_flow(chain_df):
+def calculate_net_flow(chain_df, spot=None):
     if chain_df is None or chain_df.empty:
         return {
             "call_premium": 0,
             "put_premium": 0,
             "net_premium": 0,
+            "call_delta_notional": 0,
+            "put_delta_notional": 0,
+            "net_delta_notional": 0,
             "rows": 0,
         }
 
@@ -708,6 +713,19 @@ def calculate_net_flow(chain_df):
 
     df["premium"] = df["last"] * df["activity"] * 100
 
+    # Delta Notional estimates directional exposure / hedge pressure.
+    # Calls usually carry positive delta; puts usually carry negative delta.
+    try:
+        spot_value = float(spot) if spot is not None else 0.0
+    except Exception:
+        spot_value = 0.0
+
+    if "delta" not in df.columns:
+        df["delta"] = 0
+
+    df["delta"] = pd.to_numeric(df["delta"], errors="coerce").fillna(0)
+    df["delta_notional"] = df["delta"] * spot_value * df["activity"] * 100
+
     calls = df[df["type"].str.contains("call", na=False)]
     puts = df[df["type"].str.contains("put", na=False)]
 
@@ -715,10 +733,17 @@ def calculate_net_flow(chain_df):
     put_premium = puts["premium"].sum()
     net_premium = call_premium - put_premium
 
+    call_delta_notional = calls["delta_notional"].sum()
+    put_delta_notional = puts["delta_notional"].sum()
+    net_delta_notional = df["delta_notional"].sum()
+
     return {
         "call_premium": call_premium,
         "put_premium": put_premium,
         "net_premium": net_premium,
+        "call_delta_notional": call_delta_notional,
+        "put_delta_notional": put_delta_notional,
+        "net_delta_notional": net_delta_notional,
         "rows": len(df),
     }
 
@@ -805,8 +830,8 @@ def load_expiration_flow(symbol):
     else:
         all_chain = pd.DataFrame()
 
-    zero_flow = calculate_net_flow(zero_dte_chain)
-    all_flow = calculate_net_flow(all_chain)
+    zero_flow = calculate_net_flow(zero_dte_chain, spot)
+    all_flow = calculate_net_flow(all_chain, spot)
     gamma_levels = get_gamma_levels(all_chain, spot)
 
     return {
@@ -849,9 +874,11 @@ def append_exp_snapshot(flow_data):
         "zero_dte_call_premium": flow_data["zero_dte"]["call_premium"],
         "zero_dte_put_premium": flow_data["zero_dte"]["put_premium"],
         "zero_dte_net_premium": flow_data["zero_dte"]["net_premium"],
+        "zero_dte_delta_notional": flow_data["zero_dte"].get("net_delta_notional", 0),
         "all_exp_call_premium": flow_data["all_exp"]["call_premium"],
         "all_exp_put_premium": flow_data["all_exp"]["put_premium"],
         "all_exp_net_premium": flow_data["all_exp"]["net_premium"],
+        "all_exp_delta_notional": flow_data["all_exp"].get("net_delta_notional", 0),
         "zero_dte_rows": flow_data["zero_dte"]["rows"],
         "all_exp_rows": flow_data["all_exp"]["rows"],
     }
@@ -899,6 +926,10 @@ def build_chart_df(history_df):
     if df.empty:
         return pd.DataFrame()
 
+    for missing_col in ["zero_dte_delta_notional", "all_exp_delta_notional"]:
+        if missing_col not in df.columns:
+            df[missing_col] = 0
+
     df = (
         df.set_index("datetime")
         .sort_index()
@@ -908,17 +939,27 @@ def build_chart_df(history_df):
                 "spot": "last",
                 "zero_dte_net_premium": "last",
                 "all_exp_net_premium": "last",
+                "zero_dte_delta_notional": "last",
+                "all_exp_delta_notional": "last",
             }
         )
         .dropna(how="all")
         .reset_index()
     )
 
-    for col in ["spot", "zero_dte_net_premium", "all_exp_net_premium"]:
+    for col in [
+        "spot",
+        "zero_dte_net_premium",
+        "all_exp_net_premium",
+        "zero_dte_delta_notional",
+        "all_exp_delta_notional",
+    ]:
         df[col] = pd.to_numeric(df.get(col, 0), errors="coerce").ffill().fillna(0)
 
     df["zero_dte_flow"] = df["zero_dte_net_premium"].diff().fillna(0).cumsum()
     df["all_exp_flow"] = df["all_exp_net_premium"].diff().fillna(0).cumsum()
+    df["zero_dte_delta_notional_flow"] = df["zero_dte_delta_notional"].diff().fillna(0).cumsum()
+    df["all_exp_delta_notional_flow"] = df["all_exp_delta_notional"].diff().fillna(0).cumsum()
     df["time"] = pd.to_datetime(df["datetime"]).dt.strftime("%I:%M:%S %p")
 
     return df
@@ -1035,6 +1076,33 @@ def sg2_flow_chart(history_df, symbol, flow_data):
         )
     )
 
+    if show_delta_notional_lines:
+        fig.add_trace(
+            go.Scatter(
+                x=df["time"],
+                y=df["all_exp_delta_notional_flow"],
+                mode="lines",
+                name="All Exp Δ Notional",
+                line=dict(color="#a855f7", width=3, dash="dot"),
+                yaxis="y",
+                showlegend=True,
+                visible=True,
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=df["time"],
+                y=df["zero_dte_delta_notional_flow"],
+                mode="lines",
+                name="0DTE Δ Notional",
+                line=dict(color="#00e5ff", width=3, dash="dot"),
+                yaxis="y",
+                showlegend=True,
+                visible=True,
+            )
+        )
+
     if show_signed_delta_line:
         try:
             signed_snapshot = get_flow_snapshot(
@@ -1131,6 +1199,8 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     latest_all = df["all_exp_flow"].iloc[-1]
     latest_zero = df["zero_dte_flow"].iloc[-1]
     latest_spot = df["spot"].iloc[-1]
+    latest_zero_delta_notional = df["zero_dte_delta_notional_flow"].iloc[-1]
+    latest_all_delta_notional = df["all_exp_delta_notional_flow"].iloc[-1]
     latest_time = str(df["time"].iloc[-1])
 
     if show_right_labels:
@@ -1138,8 +1208,33 @@ def sg2_flow_chart(history_df, symbol, flow_data):
         add_right_edge_label(fig, latest_time, latest_zero, fmt_money(latest_zero), "#00ff38", yref="y")
         add_right_edge_label(fig, latest_time, latest_spot, fmt_price(latest_spot), "#ffffff", yref="y2")
 
-    flow_min = min(df["all_exp_flow"].min(), df["zero_dte_flow"].min(), 0)
-    flow_max = max(df["all_exp_flow"].max(), df["zero_dte_flow"].max(), 0)
+        if show_delta_notional_lines:
+            add_right_edge_label(fig, latest_time, latest_all_delta_notional, fmt_money(latest_all_delta_notional), "#a855f7", yref="y")
+            add_right_edge_label(fig, latest_time, latest_zero_delta_notional, fmt_money(latest_zero_delta_notional), "#00e5ff", yref="y")
+
+    flow_values_for_range = [
+        df["all_exp_flow"].min(),
+        df["zero_dte_flow"].min(),
+        0,
+    ]
+    flow_values_for_range_max = [
+        df["all_exp_flow"].max(),
+        df["zero_dte_flow"].max(),
+        0,
+    ]
+
+    if show_delta_notional_lines:
+        flow_values_for_range.extend([
+            df["all_exp_delta_notional_flow"].min(),
+            df["zero_dte_delta_notional_flow"].min(),
+        ])
+        flow_values_for_range_max.extend([
+            df["all_exp_delta_notional_flow"].max(),
+            df["zero_dte_delta_notional_flow"].max(),
+        ])
+
+    flow_min = min(flow_values_for_range)
+    flow_max = max(flow_values_for_range_max)
     flow_span = flow_max - flow_min
 
     if flow_span <= 0:
@@ -1335,6 +1430,8 @@ odte_exp = safe_get(snapshot, "odte_exp", exp_flow_data.get("today_exp", ""))
 
 odte_premium_net = exp_flow_data["zero_dte"]["net_premium"]
 all_exp_premium_net = exp_flow_data["all_exp"]["net_premium"]
+odte_delta_notional_net = exp_flow_data["zero_dte"].get("net_delta_notional", 0)
+all_exp_delta_notional_net = exp_flow_data["all_exp"].get("net_delta_notional", 0)
 
 odte_signed_delta = safe_get(snapshot, "odte_signed_delta", 0)
 odte_delta_bias = safe_get(snapshot, "odte_delta_bias", "NEUTRAL")
@@ -1371,6 +1468,10 @@ header_html = f"""
         All Exp Used: {all_exp_count}
         &nbsp;&nbsp; | &nbsp;&nbsp;
         <span class="yellow-text">All Exp Flow:</span> {fmt_money(all_exp_premium_net)}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="cyan-text">0DTE Δ Notional:</span> {fmt_money(odte_delta_notional_net)}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="cyan-text">All Exp Δ Notional:</span> {fmt_money(all_exp_delta_notional_net)}
     </div>
 </div>
 """
@@ -1402,12 +1503,14 @@ else:
 # =========================================================
 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
 
-r1 = st.columns(5)
+r1 = st.columns(7)
 r1[0].markdown(metric_html("Spot", f"{float(spot):.2f}"), unsafe_allow_html=True)
 r1[1].markdown(metric_html("0DTE Premium Net", fmt_money(odte_premium_net), color_class(odte_premium_net)), unsafe_allow_html=True)
 r1[2].markdown(metric_html("All Exp Premium Net", fmt_money(all_exp_premium_net), color_class(all_exp_premium_net)), unsafe_allow_html=True)
-r1[3].markdown(metric_html("Call Gamma", fmt_price(call_gamma), "green-text"), unsafe_allow_html=True)
-r1[4].markdown(metric_html("Put Gamma", fmt_price(put_gamma), "red-text"), unsafe_allow_html=True)
+r1[3].markdown(metric_html("0DTE Δ Notional", fmt_money(odte_delta_notional_net), color_class(odte_delta_notional_net)), unsafe_allow_html=True)
+r1[4].markdown(metric_html("All Exp Δ Notional", fmt_money(all_exp_delta_notional_net), color_class(all_exp_delta_notional_net)), unsafe_allow_html=True)
+r1[5].markdown(metric_html("Call Gamma", fmt_price(call_gamma), "green-text"), unsafe_allow_html=True)
+r1[6].markdown(metric_html("Put Gamma", fmt_price(put_gamma), "red-text"), unsafe_allow_html=True)
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
