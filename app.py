@@ -309,67 +309,6 @@ section[data-testid="stSidebar"] .stSlider span {
 .cyan-text { color: #00e5ff !important; }
 
 hr { border-color: #263241; }
-
-.dashboard-title {
-    text-align: center;
-    margin: 8px 0 14px 0;
-}
-.dashboard-title-main {
-    color: #ffffff;
-    font-size: 38px;
-    font-weight: 1000;
-    letter-spacing: 1px;
-    text-shadow: 0 0 18px rgba(255,255,255,.20);
-}
-.dashboard-title-sub {
-    color: #f4f7fb;
-    font-size: 19px;
-    font-weight: 800;
-    margin-top: 4px;
-}
-.stat-card {
-    background: linear-gradient(180deg, rgba(17,25,35,.98), rgba(7,11,16,.98));
-    border-radius: 14px;
-    padding: 14px 16px;
-    min-height: 104px;
-    box-shadow: 0 0 22px rgba(0,0,0,.35);
-    text-align: center;
-}
-.stat-card-green { border: 1px solid #22c55e; box-shadow: 0 0 18px rgba(34,197,94,.18); }
-.stat-card-yellow { border: 1px solid #facc15; box-shadow: 0 0 18px rgba(250,204,21,.18); }
-.stat-card-cyan { border: 1px solid #00e5ff; box-shadow: 0 0 18px rgba(0,229,255,.18); }
-.stat-card-purple { border: 1px solid #a855f7; box-shadow: 0 0 18px rgba(168,85,247,.18); }
-.stat-label { font-size: 14px; font-weight: 1000; letter-spacing: .5px; }
-.stat-value { font-size: 30px; font-weight: 1000; margin-top: 5px; }
-.stat-small { color: #d7dee8; font-size: 13px; font-weight: 800; margin-top: 3px; }
-.explainer-card {
-    background: linear-gradient(180deg, #101923, #070b10);
-    border: 1px solid #263241;
-    border-radius: 14px;
-    padding: 14px 16px;
-    min-height: 150px;
-    box-shadow: 0 0 16px rgba(0,0,0,.35);
-}
-.explainer-title {
-    color: white;
-    font-size: 16px;
-    font-weight: 1000;
-    margin-bottom: 8px;
-    text-align: center;
-}
-.explainer-text {
-    color: #f4f7fb;
-    font-size: 14px;
-    font-weight: 700;
-    line-height: 1.55;
-}
-.legend-pill {
-    display: inline-block;
-    width: 11px;
-    height: 11px;
-    border-radius: 50%;
-    margin-right: 7px;
-}
 </style>
 """,
     unsafe_allow_html=True,
@@ -412,7 +351,7 @@ with st.sidebar:
 
     show_flow_dots = st.checkbox("Show FLOW Dots", value=True)
     show_signed_delta_line = st.checkbox("Show Signed Delta Line", value=False)
-    show_delta_notional_lines = st.checkbox("Show Delta Notional Lines", value=True)
+    show_delta_notional_lines = st.checkbox("Show Delta Notional Lines", value=False)
     show_right_labels = st.checkbox("Show Right Edge Labels", value=True)
 
     default_flow_dot_threshold = FLOW_DOT_THRESHOLDS.get(symbol, 25_000_000)
@@ -1145,7 +1084,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
                 mode="lines",
                 name="All Exp Δ Notional",
                 line=dict(color="#a855f7", width=3, dash="dot"),
-                yaxis="y",
+                yaxis="y3",
                 showlegend=True,
                 visible=True,
             )
@@ -1158,7 +1097,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
                 mode="lines",
                 name="0DTE Δ Notional",
                 line=dict(color="#00e5ff", width=3, dash="dot"),
-                yaxis="y",
+                yaxis="y3",
                 showlegend=True,
                 visible=True,
             )
@@ -1270,32 +1209,16 @@ def sg2_flow_chart(history_df, symbol, flow_data):
         add_right_edge_label(fig, latest_time, latest_spot, fmt_price(latest_spot), "#ffffff", yref="y2")
 
         if show_delta_notional_lines:
-            add_right_edge_label(fig, latest_time, latest_all_delta_notional, fmt_money(latest_all_delta_notional), "#a855f7", yref="y")
-            add_right_edge_label(fig, latest_time, latest_zero_delta_notional, fmt_money(latest_zero_delta_notional), "#00e5ff", yref="y")
+            add_right_edge_label(fig, latest_time, latest_all_delta_notional, fmt_money(latest_all_delta_notional), "#a855f7", yref="y3", xshift=42)
+            add_right_edge_label(fig, latest_time, latest_zero_delta_notional, fmt_money(latest_zero_delta_notional), "#00e5ff", yref="y3", xshift=42)
 
-    flow_values_for_range = [
-        df["all_exp_flow"].min(),
-        df["zero_dte_flow"].min(),
-        0,
-    ]
-    flow_values_for_range_max = [
-        df["all_exp_flow"].max(),
-        df["zero_dte_flow"].max(),
-        0,
-    ]
-
-    if show_delta_notional_lines:
-        flow_values_for_range.extend([
-            df["all_exp_delta_notional_flow"].min(),
-            df["zero_dte_delta_notional_flow"].min(),
-        ])
-        flow_values_for_range_max.extend([
-            df["all_exp_delta_notional_flow"].max(),
-            df["zero_dte_delta_notional_flow"].max(),
-        ])
-
-    flow_min = min(flow_values_for_range)
-    flow_max = max(flow_values_for_range_max)
+    # =========================================================
+    # AXIS 1: PREMIUM FLOW SCALE (GREEN / YELLOW)
+    # =========================================================
+    # Premium flow gets its own left axis so delta notional spikes over 1B
+    # do not compress the premium-flow lines.
+    flow_min = min(df["all_exp_flow"].min(), df["zero_dte_flow"].min(), 0)
+    flow_max = max(df["all_exp_flow"].max(), df["zero_dte_flow"].max(), 0)
     flow_span = flow_max - flow_min
 
     if flow_span <= 0:
@@ -1303,6 +1226,27 @@ def sg2_flow_chart(history_df, symbol, flow_data):
 
     flow_pad = flow_span * 0.18
     flow_range = [flow_min - flow_pad, flow_max + flow_pad]
+
+    # =========================================================
+    # AXIS 3: DELTA NOTIONAL SCALE (CYAN / PURPLE)
+    # =========================================================
+    delta_min = min(
+        df["all_exp_delta_notional_flow"].min(),
+        df["zero_dte_delta_notional_flow"].min(),
+        0,
+    )
+    delta_max = max(
+        df["all_exp_delta_notional_flow"].max(),
+        df["zero_dte_delta_notional_flow"].max(),
+        0,
+    )
+    delta_span = delta_max - delta_min
+
+    if delta_span <= 0:
+        delta_span = max(abs(delta_max), abs(delta_min), 1)
+
+    delta_pad = delta_span * 0.18
+    delta_range = [delta_min - delta_pad, delta_max + delta_pad]
 
     positive_spots = pd.to_numeric(df.get("spot", pd.Series(dtype=float)), errors="coerce")
     positive_spots = positive_spots[positive_spots > 0]
@@ -1367,6 +1311,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             tickfont=dict(color="white", size=11, family="Arial Black"),
             nticks=18,
             type="category",
+            domain=[0.0, 0.88],
         ),
         yaxis=dict(
             title=dict(text="Premium Flow", font=dict(color="#facc15", size=14)),
@@ -1383,10 +1328,24 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             title=dict(text=f"{symbol} Price", font=dict(color="#ffffff", size=14)),
             overlaying="y",
             side="right",
+            anchor="free",
+            position=1.0,
             range=price_range,
             showgrid=False,
             dtick=price_dtick,
             tickfont=dict(color="#ffffff", size=13, family="Arial Black"),
+        ),
+        yaxis3=dict(
+            title=dict(text="Delta Notional", font=dict(color="#00e5ff", size=14)),
+            overlaying="y",
+            side="right",
+            anchor="free",
+            position=0.92,
+            range=delta_range,
+            showgrid=False,
+            tickformat="~s",
+            tickfont=dict(color="#00e5ff", size=13, family="Arial Black"),
+            visible=show_delta_notional_lines,
         ),
         legend=dict(
             orientation="h",
@@ -1395,7 +1354,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             bgcolor="rgba(0,0,0,0.25)",
             font=dict(color="white", size=12, family="Arial Black"),
         ),
-        margin=dict(l=75, r=105, t=80, b=120),
+        margin=dict(l=75, r=150, t=80, b=120),
         hovermode="x unified",
     )
 
@@ -1458,7 +1417,21 @@ except Exception as e:
 
 
 # =========================================================
-# LOAD SG2 SNAPSHOT FOR METRICS
+# MAIN FLOW CHART - FULL WIDTH DIRECTLY UNDER ACTIVE BAR
+# =========================================================
+st.plotly_chart(
+    sg2_flow_chart(
+        exp_history_df,
+        symbol,
+        exp_flow_data,
+    ),
+    use_container_width=True,
+    config={"displayModeBar": False},
+)
+
+
+# =========================================================
+# LOAD SG2 SNAPSHOT FOR METRICS BELOW CHART
 # =========================================================
 try:
     snapshot = get_flow_snapshot(
@@ -1492,165 +1465,42 @@ gamma_regime = safe_get(snapshot, "gamma_regime", "NEUTRAL")
 odte_rows = exp_flow_data["zero_dte"]["rows"]
 all_exp_rows = exp_flow_data["all_exp"]["rows"]
 
+
+# =========================================================
+# HEADER / SUMMARY BELOW CHART
+# =========================================================
 today_txt = datetime.now(CENTRAL_TZ).strftime("%A, %B %d, %Y")
-last_updated = datetime.now(CENTRAL_TZ).strftime("%I:%M:%S %p CT")
+
+header_html = f"""
+<div class="header-card">
+    <div style="font-size:25px;font-weight:900;color:white;">
+        {symbol} {today_txt}
+    </div>
+    <div style="font-size:15px;font-weight:800;color:white;margin-top:8px;">
+        Spot: <span class="green-text">{float(spot):.2f}</span>
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        0DTE Exp: <span class="yellow-text">{odte_exp}</span>
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="yellow-text">0DTE Flow:</span> {fmt_money(odte_premium_net)}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="cyan-text">Signed Delta:</span> {fmt_money(odte_signed_delta)}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        All Exp Used: {all_exp_count}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="yellow-text">All Exp Flow:</span> {fmt_money(all_exp_premium_net)}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="cyan-text">0DTE Δ Notional:</span> {fmt_money(odte_delta_notional_net)}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="cyan-text">All Exp Δ Notional:</span> {fmt_money(all_exp_delta_notional_net)}
+    </div>
+</div>
+"""
+
+st.markdown(header_html, unsafe_allow_html=True)
+
 
 # =========================================================
-# SKETCH STYLE HEADER
-# =========================================================
-st.markdown(
-    f"""
-    <div class="dashboard-title">
-        <div class="dashboard-title-main">🟢 SG² MATRIX — {symbol}</div>
-        <div class="dashboard-title-sub">0DTE vs ALL EXPIRATIONS &nbsp; | &nbsp; Premium Flow & Delta Notional Overlay</div>
-        <div style="color:#8ea0b8;font-weight:800;margin-top:4px;">Last Updated: {last_updated}</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-# =========================================================
-# TOP SKETCH STYLE STAT CARDS
-# =========================================================
-card_cols = st.columns(4)
-
-card_cols[0].markdown(
-    f"""
-    <div class="stat-card stat-card-green">
-        <div class="stat-label green-text">0DTE PREMIUM FLOW</div>
-        <div class="stat-value green-text">{fmt_money(odte_premium_net)}</div>
-        <div class="stat-small">Rows: {odte_rows} | Exp: {odte_exp}</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-card_cols[1].markdown(
-    f"""
-    <div class="stat-card stat-card-yellow">
-        <div class="stat-label yellow-text">ALL EXP PREMIUM FLOW</div>
-        <div class="stat-value yellow-text">{fmt_money(all_exp_premium_net)}</div>
-        <div class="stat-small">Expirations Used: {all_exp_count}</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-card_cols[2].markdown(
-    f"""
-    <div class="stat-card stat-card-cyan">
-        <div class="stat-label cyan-text">0DTE Δ NOTIONAL</div>
-        <div class="stat-value cyan-text">{fmt_money(odte_delta_notional_net)}</div>
-        <div class="stat-small">Directional 0DTE exposure</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-card_cols[3].markdown(
-    f"""
-    <div class="stat-card stat-card-purple">
-        <div class="stat-label" style="color:#c084fc;">ALL EXP Δ NOTIONAL</div>
-        <div class="stat-value" style="color:#c084fc;">{fmt_money(all_exp_delta_notional_net)}</div>
-        <div class="stat-small">Directional all-exp exposure</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-# =========================================================
-# MAIN FLOW CHART - SKETCH STYLE
-# =========================================================
-st.plotly_chart(
-    sg2_flow_chart(
-        exp_history_df,
-        symbol,
-        exp_flow_data,
-    ),
-    use_container_width=True,
-    config={"displayModeBar": False},
-)
-
-# =========================================================
-# HOW TO READ / STATUS CARDS BELOW CHART
-# =========================================================
-status_color = "green-text" if odte_premium_net > 0 and odte_delta_notional_net > 0 else "red-text" if odte_premium_net < 0 and odte_delta_notional_net < 0 else "yellow-text"
-status_text = (
-    "Both 0DTE premium flow and delta notional are positive. Bullish confirmation."
-    if odte_premium_net > 0 and odte_delta_notional_net > 0
-    else "Both 0DTE premium flow and delta notional are negative. Bearish confirmation."
-    if odte_premium_net < 0 and odte_delta_notional_net < 0
-    else "Premium flow and delta notional are mixed. Watch for divergence or weak conviction."
-)
-
-info_cols = st.columns(4)
-
-info_cols[0].markdown(
-    """
-    <div class="explainer-card">
-        <div class="explainer-title">HOW TO READ</div>
-        <div class="explainer-text">
-            <span style="color:#ffffff;">WHITE</span> = Price<br>
-            <span style="color:#00ff38;">GREEN</span> = 0DTE Premium Flow<br>
-            <span style="color:#ffe100;">YELLOW</span> = All Exp Premium Flow<br>
-            <span style="color:#00e5ff;">CYAN</span> = 0DTE Delta Notional<br>
-            <span style="color:#a855f7;">PURPLE</span> = All Exp Delta Notional
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-info_cols[1].markdown(
-    """
-    <div class="explainer-card">
-        <div class="explainer-title">WHAT IT MEANS</div>
-        <div class="explainer-text">
-            Premium Flow = money flowing into calls vs puts.<br><br>
-            Delta Notional = directional exposure estimate:<br>
-            Delta × Spot × Contracts × 100.<br><br>
-            Both rising together = stronger directional conviction.
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-info_cols[2].markdown(
-    """
-    <div class="explainer-card">
-        <div class="explainer-title">EXAMPLES</div>
-        <div class="explainer-text">
-            <span class="green-text">Premium ↑ + Delta Notional ↑</span><br>
-            = Strong bullish confirmation<br><br>
-            <span class="yellow-text">Premium ↑ + Delta Notional ↓</span><br>
-            = Speculative / weaker rally<br><br>
-            <span class="cyan-text">Premium flat + Delta Notional ↑</span><br>
-            = Directional pressure building
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-info_cols[3].markdown(
-    f"""
-    <div class="explainer-card">
-        <div class="explainer-title">CURRENT STATUS</div>
-        <div class="explainer-text">
-            <span class="green-text">0DTE Premium:</span> {fmt_money(odte_premium_net)}<br>
-            <span class="yellow-text">All Exp Premium:</span> {fmt_money(all_exp_premium_net)}<br>
-            <span class="cyan-text">0DTE Δ Notional:</span> {fmt_money(odte_delta_notional_net)}<br>
-            <span style="color:#c084fc;">All Exp Δ Notional:</span> {fmt_money(all_exp_delta_notional_net)}<br><br>
-            <span class="{status_color}">{status_text}</span>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-# =========================================================
-# DETAILED METRICS BELOW SKETCH CARDS
+# VOLUME STATS
 # =========================================================
 chain_df = safe_get(snapshot, "chain_df", pd.DataFrame())
 
@@ -1667,6 +1517,10 @@ if isinstance(chain_df, pd.DataFrame) and not chain_df.empty and "volume" in cha
 else:
     call_volume, put_volume, total_volume, pc_ratio = 0, 0, 0, 0
 
+
+# =========================================================
+# METRICS BELOW CHART
+# =========================================================
 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
 
 r1 = st.columns(7)
