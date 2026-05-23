@@ -14,7 +14,6 @@ from flow_engine import get_flow_snapshot
 
 CENTRAL_TZ = ZoneInfo("America/Chicago")
 
-
 # =========================================================
 # PAGE CONFIG
 # =========================================================
@@ -23,7 +22,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-
 
 # =========================================================
 # ENV / TRADIER
@@ -38,7 +36,6 @@ HEADERS = {
     "Authorization": f"Bearer {TRADIER_API_KEY}",
     "Accept": "application/json",
 }
-
 
 # =========================================================
 # PASSWORD PROTECTION
@@ -138,10 +135,8 @@ def check_password():
 
     return False
 
-
 if not check_password():
     st.stop()
-
 
 # =========================================================
 # SYMBOL CONFIG
@@ -172,7 +167,6 @@ STRIKE_COUNT_DEFAULTS = {
     "SPX": 25,
 }
 
-
 # =========================================================
 # SESSION STATE
 # =========================================================
@@ -183,7 +177,6 @@ if st.session_state.selected_symbol not in SYMBOLS:
     st.session_state.selected_symbol = "SPX"
 
 symbol = st.session_state.selected_symbol
-
 
 # =========================================================
 # CSS
@@ -309,72 +302,10 @@ section[data-testid="stSidebar"] .stSlider span {
 .cyan-text { color: #00e5ff !important; }
 
 hr { border-color: #263241; }
-
-.dashboard-title {
-    text-align: center;
-    margin: 8px 0 14px 0;
-}
-.dashboard-title-main {
-    color: #ffffff;
-    font-size: 38px;
-    font-weight: 1000;
-    letter-spacing: 1px;
-    text-shadow: 0 0 18px rgba(255,255,255,.20);
-}
-.dashboard-title-sub {
-    color: #f4f7fb;
-    font-size: 19px;
-    font-weight: 800;
-    margin-top: 4px;
-}
-.stat-card {
-    background: linear-gradient(180deg, rgba(17,25,35,.98), rgba(7,11,16,.98));
-    border-radius: 14px;
-    padding: 14px 16px;
-    min-height: 104px;
-    box-shadow: 0 0 22px rgba(0,0,0,.35);
-    text-align: center;
-}
-.stat-card-green { border: 1px solid #22c55e; box-shadow: 0 0 18px rgba(34,197,94,.18); }
-.stat-card-yellow { border: 1px solid #facc15; box-shadow: 0 0 18px rgba(250,204,21,.18); }
-.stat-card-cyan { border: 1px solid #00e5ff; box-shadow: 0 0 18px rgba(0,229,255,.18); }
-.stat-card-purple { border: 1px solid #a855f7; box-shadow: 0 0 18px rgba(168,85,247,.18); }
-.stat-label { font-size: 14px; font-weight: 1000; letter-spacing: .5px; }
-.stat-value { font-size: 30px; font-weight: 1000; margin-top: 5px; }
-.stat-small { color: #d7dee8; font-size: 13px; font-weight: 800; margin-top: 3px; }
-.explainer-card {
-    background: linear-gradient(180deg, #101923, #070b10);
-    border: 1px solid #263241;
-    border-radius: 14px;
-    padding: 14px 16px;
-    min-height: 150px;
-    box-shadow: 0 0 16px rgba(0,0,0,.35);
-}
-.explainer-title {
-    color: white;
-    font-size: 16px;
-    font-weight: 1000;
-    margin-bottom: 8px;
-    text-align: center;
-}
-.explainer-text {
-    color: #f4f7fb;
-    font-size: 14px;
-    font-weight: 700;
-    line-height: 1.55;
-}
-.legend-pill {
-    display: inline-block;
-    width: 11px;
-    height: 11px;
-    border-radius: 50%;
-    margin-right: 7px;
-}
 </style>
 """,
     unsafe_allow_html=True,
 )
-
 
 # =========================================================
 # SIDEBAR
@@ -412,7 +343,7 @@ with st.sidebar:
 
     show_flow_dots = st.checkbox("Show FLOW Dots", value=True)
     show_signed_delta_line = st.checkbox("Show Signed Delta Line", value=False)
-    show_delta_notional_lines = st.checkbox("Show Delta Notional Lines", value=True)
+    show_delta_notional_lines = st.checkbox("Show Delta Notional Lines", value=False)
     show_right_labels = st.checkbox("Show Right Edge Labels", value=True)
 
     default_flow_dot_threshold = FLOW_DOT_THRESHOLDS.get(symbol, 25_000_000)
@@ -441,13 +372,11 @@ with st.sidebar:
     st.caption("History files are capped at 1,500 rows per symbol.")
     st.caption("Delta Notional = Delta × Spot × Contracts × 100.")
 
-
 if auto_refresh:
     st_autorefresh(
         interval=refresh_interval * 1000,
         key="flow_refresh_main",
     )
-
 
 # =========================================================
 # FORMAT HELPERS
@@ -469,7 +398,6 @@ def fmt_money(value):
 
     return f"{value:.0f}"
 
-
 def fmt_num(value):
     try:
         value = float(value)
@@ -483,13 +411,11 @@ def fmt_num(value):
 
     return f"{value:.0f}"
 
-
 def fmt_price(value):
     try:
         return f"{float(value):,.2f}"
     except Exception:
         return "—"
-
 
 def metric_html(label, value, color_class=""):
     return f"""
@@ -498,7 +424,6 @@ def metric_html(label, value, color_class=""):
         <div class="metric-value {color_class}">{value}</div>
     </div>
     """
-
 
 def color_class(value):
     try:
@@ -512,12 +437,10 @@ def color_class(value):
         return "red-text"
     return ""
 
-
 def safe_get(snapshot, key, default=0):
     if not isinstance(snapshot, dict):
         return default
     return snapshot.get(key, default)
-
 
 # =========================================================
 # TRADIER / EXPIRATION FLOW ENGINE
@@ -540,7 +463,6 @@ def tradier_get(endpoint, params=None):
 
     return response.json()
 
-
 def get_price(symbol):
     data = tradier_get(
         "markets/quotes",
@@ -561,7 +483,6 @@ def get_price(symbol):
             pass
 
     raise Exception(f"No valid price returned for {symbol}: {quote}")
-
 
 def get_expirations(symbol):
     data = tradier_get(
@@ -588,7 +509,6 @@ def get_expirations(symbol):
 
     return expirations
 
-
 def flatten_greeks(df):
     if "greeks" not in df.columns:
         return df
@@ -604,7 +524,6 @@ def flatten_greeks(df):
             df[key] = df.apply(lambda row: get_greek(row, key), axis=1)
 
     return df
-
 
 def get_option_chain(symbol, expiration):
     data = tradier_get(
@@ -710,7 +629,6 @@ def get_option_chain(symbol, expiration):
 
     return df
 
-
 def filter_near_spot(df, spot, strikes_each_side):
     """
     Keep a fixed number of listed strikes above and below spot.
@@ -739,7 +657,6 @@ def filter_near_spot(df, spot, strikes_each_side):
     selected_strikes = set(strikes[start_idx:end_idx])
 
     return temp[temp["strike"].isin(selected_strikes)].copy()
-
 
 def calculate_net_flow(chain_df, spot=None):
     if chain_df is None or chain_df.empty:
@@ -808,7 +725,6 @@ def calculate_net_flow(chain_df, spot=None):
         "rows": len(df),
     }
 
-
 def get_gamma_levels(chain_df, spot):
     if chain_df is None or chain_df.empty:
         return {
@@ -853,7 +769,6 @@ def get_gamma_levels(chain_df, spot):
         "top_call_gamma": top_call,
         "top_put_gamma": top_put,
     }
-
 
 def load_expiration_flow(symbol):
     spot = get_price(symbol)
@@ -905,23 +820,19 @@ def load_expiration_flow(symbol):
         "gamma_levels": gamma_levels,
     }
 
-
 # =========================================================
 # SESSION FILE HISTORY FOR CHART
 # =========================================================
 SESSION_DIR = Path(__file__).parent / "expiration_flow_history"
 SESSION_DIR.mkdir(exist_ok=True)
 
-
 def session_file(symbol):
     return SESSION_DIR / f"expiration_flow_{symbol.upper()}.csv"
-
 
 def reset_symbol_history(symbol):
     file_path = session_file(symbol)
     if file_path.exists():
         file_path.unlink()
-
 
 def append_exp_snapshot(flow_data):
     file_path = session_file(flow_data["symbol"])
@@ -963,13 +874,11 @@ def append_exp_snapshot(flow_data):
 
     return df
 
-
 def normalize_history(df):
     df = df.copy()
     df["datetime"] = pd.to_datetime(df.get("datetime", pd.NaT), errors="coerce")
     df = df.dropna(subset=["datetime"]).sort_values("datetime")
     return df
-
 
 def build_chart_df(history_df):
     if history_df is None or history_df.empty:
@@ -1025,7 +934,6 @@ def build_chart_df(history_df):
 
     return df
 
-
 def add_right_edge_label(fig, x, y, text, bg, yref="y", xshift=10):
     fig.add_annotation(
         x=x,
@@ -1042,7 +950,6 @@ def add_right_edge_label(fig, x, y, text, bg, yref="y", xshift=10):
         xshift=xshift,
         yref=yref,
     )
-
 
 def add_event_trace(fig, events_df, x_col, y_col, name, marker_color, marker_symbol, text_position, marker_size):
     """Add a FLOW event trace and keep the legend item visible even with no events."""
@@ -1076,7 +983,6 @@ def add_event_trace(fig, events_df, x_col, y_col, name, marker_color, marker_sym
             yaxis="y",
         )
     )
-
 
 # =========================================================
 # CHART BUILDER
@@ -1401,7 +1307,6 @@ def sg2_flow_chart(history_df, symbol, flow_data):
 
     return fig
 
-
 # =========================================================
 # TOP SYMBOL BUTTONS
 # =========================================================
@@ -1424,7 +1329,6 @@ for i, sym in enumerate(SYMBOLS):
 symbol = st.session_state.selected_symbol
 icon = SYMBOL_ICONS.get(symbol, "📊")
 
-
 # =========================================================
 # ACTIVE BAR
 # =========================================================
@@ -1437,14 +1341,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
 # =========================================================
 # RESET HISTORY
 # =========================================================
 if reset_exp_history:
     reset_symbol_history(symbol)
     st.success(f"{symbol} flow chart history reset.")
-
 
 # =========================================================
 # LOAD EXPIRATION FLOW FOR MAIN CHART
@@ -1456,9 +1358,21 @@ except Exception as e:
     st.error(f"Could not load expiration flow chart data for {symbol}: {e}")
     st.stop()
 
+# =========================================================
+# MAIN FLOW CHART - FULL WIDTH DIRECTLY UNDER ACTIVE BAR
+# =========================================================
+st.plotly_chart(
+    sg2_flow_chart(
+        exp_history_df,
+        symbol,
+        exp_flow_data,
+    ),
+    use_container_width=True,
+    config={"displayModeBar": False},
+)
 
 # =========================================================
-# LOAD SG2 SNAPSHOT FOR METRICS
+# LOAD SG2 SNAPSHOT FOR METRICS BELOW CHART
 # =========================================================
 try:
     snapshot = get_flow_snapshot(
@@ -1470,7 +1384,6 @@ try:
     )
 except Exception:
     snapshot = {}
-
 
 spot = safe_get(snapshot, "spot", exp_flow_data.get("spot", 0))
 odte_exp = safe_get(snapshot, "odte_exp", exp_flow_data.get("today_exp", ""))
@@ -1492,165 +1405,40 @@ gamma_regime = safe_get(snapshot, "gamma_regime", "NEUTRAL")
 odte_rows = exp_flow_data["zero_dte"]["rows"]
 all_exp_rows = exp_flow_data["all_exp"]["rows"]
 
+# =========================================================
+# HEADER / SUMMARY BELOW CHART
+# =========================================================
 today_txt = datetime.now(CENTRAL_TZ).strftime("%A, %B %d, %Y")
-last_updated = datetime.now(CENTRAL_TZ).strftime("%I:%M:%S %p CT")
+
+header_html = f"""
+<div class="header-card">
+    <div style="font-size:25px;font-weight:900;color:white;">
+        {symbol} {today_txt}
+    </div>
+    <div style="font-size:15px;font-weight:800;color:white;margin-top:8px;">
+        Spot: <span class="green-text">{float(spot):.2f}</span>
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        0DTE Exp: <span class="yellow-text">{odte_exp}</span>
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="yellow-text">0DTE Flow:</span> {fmt_money(odte_premium_net)}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="cyan-text">Signed Delta:</span> {fmt_money(odte_signed_delta)}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        All Exp Used: {all_exp_count}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="yellow-text">All Exp Flow:</span> {fmt_money(all_exp_premium_net)}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="cyan-text">0DTE Δ Notional:</span> {fmt_money(odte_delta_notional_net)}
+        &nbsp;&nbsp; | &nbsp;&nbsp;
+        <span class="cyan-text">All Exp Δ Notional:</span> {fmt_money(all_exp_delta_notional_net)}
+    </div>
+</div>
+"""
+
+st.markdown(header_html, unsafe_allow_html=True)
 
 # =========================================================
-# SKETCH STYLE HEADER
-# =========================================================
-st.markdown(
-    f"""
-    <div class="dashboard-title">
-        <div class="dashboard-title-main">🟢 SG² MATRIX — {symbol}</div>
-        <div class="dashboard-title-sub">0DTE vs ALL EXPIRATIONS &nbsp; | &nbsp; Premium Flow & Delta Notional Overlay</div>
-        <div style="color:#8ea0b8;font-weight:800;margin-top:4px;">Last Updated: {last_updated}</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-# =========================================================
-# TOP SKETCH STYLE STAT CARDS
-# =========================================================
-card_cols = st.columns(4)
-
-card_cols[0].markdown(
-    f"""
-    <div class="stat-card stat-card-green">
-        <div class="stat-label green-text">0DTE PREMIUM FLOW</div>
-        <div class="stat-value green-text">{fmt_money(odte_premium_net)}</div>
-        <div class="stat-small">Rows: {odte_rows} | Exp: {odte_exp}</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-card_cols[1].markdown(
-    f"""
-    <div class="stat-card stat-card-yellow">
-        <div class="stat-label yellow-text">ALL EXP PREMIUM FLOW</div>
-        <div class="stat-value yellow-text">{fmt_money(all_exp_premium_net)}</div>
-        <div class="stat-small">Expirations Used: {all_exp_count}</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-card_cols[2].markdown(
-    f"""
-    <div class="stat-card stat-card-cyan">
-        <div class="stat-label cyan-text">0DTE Δ NOTIONAL</div>
-        <div class="stat-value cyan-text">{fmt_money(odte_delta_notional_net)}</div>
-        <div class="stat-small">Directional 0DTE exposure</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-card_cols[3].markdown(
-    f"""
-    <div class="stat-card stat-card-purple">
-        <div class="stat-label" style="color:#c084fc;">ALL EXP Δ NOTIONAL</div>
-        <div class="stat-value" style="color:#c084fc;">{fmt_money(all_exp_delta_notional_net)}</div>
-        <div class="stat-small">Directional all-exp exposure</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-# =========================================================
-# MAIN FLOW CHART - SKETCH STYLE
-# =========================================================
-st.plotly_chart(
-    sg2_flow_chart(
-        exp_history_df,
-        symbol,
-        exp_flow_data,
-    ),
-    use_container_width=True,
-    config={"displayModeBar": False},
-)
-
-# =========================================================
-# HOW TO READ / STATUS CARDS BELOW CHART
-# =========================================================
-status_color = "green-text" if odte_premium_net > 0 and odte_delta_notional_net > 0 else "red-text" if odte_premium_net < 0 and odte_delta_notional_net < 0 else "yellow-text"
-status_text = (
-    "Both 0DTE premium flow and delta notional are positive. Bullish confirmation."
-    if odte_premium_net > 0 and odte_delta_notional_net > 0
-    else "Both 0DTE premium flow and delta notional are negative. Bearish confirmation."
-    if odte_premium_net < 0 and odte_delta_notional_net < 0
-    else "Premium flow and delta notional are mixed. Watch for divergence or weak conviction."
-)
-
-info_cols = st.columns(4)
-
-info_cols[0].markdown(
-    """
-    <div class="explainer-card">
-        <div class="explainer-title">HOW TO READ</div>
-        <div class="explainer-text">
-            <span style="color:#ffffff;">WHITE</span> = Price<br>
-            <span style="color:#00ff38;">GREEN</span> = 0DTE Premium Flow<br>
-            <span style="color:#ffe100;">YELLOW</span> = All Exp Premium Flow<br>
-            <span style="color:#00e5ff;">CYAN</span> = 0DTE Delta Notional<br>
-            <span style="color:#a855f7;">PURPLE</span> = All Exp Delta Notional
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-info_cols[1].markdown(
-    """
-    <div class="explainer-card">
-        <div class="explainer-title">WHAT IT MEANS</div>
-        <div class="explainer-text">
-            Premium Flow = money flowing into calls vs puts.<br><br>
-            Delta Notional = directional exposure estimate:<br>
-            Delta × Spot × Contracts × 100.<br><br>
-            Both rising together = stronger directional conviction.
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-info_cols[2].markdown(
-    """
-    <div class="explainer-card">
-        <div class="explainer-title">EXAMPLES</div>
-        <div class="explainer-text">
-            <span class="green-text">Premium ↑ + Delta Notional ↑</span><br>
-            = Strong bullish confirmation<br><br>
-            <span class="yellow-text">Premium ↑ + Delta Notional ↓</span><br>
-            = Speculative / weaker rally<br><br>
-            <span class="cyan-text">Premium flat + Delta Notional ↑</span><br>
-            = Directional pressure building
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-info_cols[3].markdown(
-    f"""
-    <div class="explainer-card">
-        <div class="explainer-title">CURRENT STATUS</div>
-        <div class="explainer-text">
-            <span class="green-text">0DTE Premium:</span> {fmt_money(odte_premium_net)}<br>
-            <span class="yellow-text">All Exp Premium:</span> {fmt_money(all_exp_premium_net)}<br>
-            <span class="cyan-text">0DTE Δ Notional:</span> {fmt_money(odte_delta_notional_net)}<br>
-            <span style="color:#c084fc;">All Exp Δ Notional:</span> {fmt_money(all_exp_delta_notional_net)}<br><br>
-            <span class="{status_color}">{status_text}</span>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-# =========================================================
-# DETAILED METRICS BELOW SKETCH CARDS
+# VOLUME STATS
 # =========================================================
 chain_df = safe_get(snapshot, "chain_df", pd.DataFrame())
 
@@ -1667,6 +1455,9 @@ if isinstance(chain_df, pd.DataFrame) and not chain_df.empty and "volume" in cha
 else:
     call_volume, put_volume, total_volume, pc_ratio = 0, 0, 0, 0
 
+# =========================================================
+# METRICS BELOW CHART
+# =========================================================
 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
 
 r1 = st.columns(7)
@@ -1695,3 +1486,5 @@ r2[9].markdown(metric_html("P/C Ratio", f"{pc_ratio:.2f}", "yellow-text"), unsaf
 st.markdown("</div>", unsafe_allow_html=True)
 
 st.caption("All values are real-time estimates. Not financial advice. Data may be delayed.")
+
+
