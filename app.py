@@ -1422,7 +1422,6 @@ def export_spx_to_tradestation(flow_data, history_df):
             f"BEAR_FLOW={bear_flow}",
             f"UPDATED={datetime.now(CENTRAL_TZ).strftime('%H:%M:%S')}"
         ])
-    )
 
 # =========================================================
 # LOAD EXPIRATION FLOW FOR MAIN CHART
