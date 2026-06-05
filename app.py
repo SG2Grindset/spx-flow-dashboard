@@ -1425,7 +1425,7 @@ def export_spx_to_tradestation(flow_data, history_df):
 # LOAD EXPIRATION FLOW FOR MAIN CHART
 # =========================================================
 
-    try:
+try:
     exp_flow_data = load_expiration_flow(symbol)
     exp_history_df = append_exp_snapshot(exp_flow_data)
 
