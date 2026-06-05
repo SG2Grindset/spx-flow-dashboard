@@ -1410,9 +1410,9 @@ def export_spx_to_tradestation(flow_data, history_df):
 
     export_file.write_text("\n".join(lines))
 
-print("SG2 EXPORT WRITTEN")
-print(export_file)
-print(lines)([
+    print("SG2 EXPORT WRITTEN")
+    print(export_file)
+    print(lines)([
             f"SPOT={spot}",
             f"ZERO_DTE_FLOW={zero_flow}",
             f"ALL_EXP_FLOW={all_flow}",
