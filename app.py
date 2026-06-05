@@ -1403,8 +1403,8 @@ def export_spx_to_tradestation(flow_data, history_df):
     put_gamma = gamma_levels.get("top_put_gamma") or 0
     spot = flow_data.get("spot", 0)
 
-    bull_flow = 1 if zero_flow > 150000000 else 0
-    bear_flow = 1 if zero_flow < -150000000 else 0
+    bull_flow = 1 if zero_flow > 100000 else 0
+    bear_flow = 1 if zero_flow < -100000 else 0
 
     export_file = TS_EXPORT_DIR / "SG2_SPX_FLOW.txt"
 
