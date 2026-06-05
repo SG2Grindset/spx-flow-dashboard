@@ -1403,16 +1403,13 @@ def export_spx_to_tradestation(flow_data, history_df):
     put_gamma = gamma_levels.get("top_put_gamma") or 0
     spot = flow_data.get("spot", 0)
 
-    bull_flow = 1 if zero_flow > 100000 else 0
-    bear_flow = 1 if zero_flow < -100000 else 0
+    bull_flow = 1 if zero_flow > 150000000 else 0
+    bear_flow = 1 if zero_flow < -150000000 else 0
 
     export_file = TS_EXPORT_DIR / "SG2_SPX_FLOW.txt"
 
-    export_file.write_text("\n".join(lines))
-
-    print("SG2 EXPORT WRITTEN")
-    print(export_file)
-    print(lines)([
+    export_file.write_text(
+        "\n".join([
             f"SPOT={spot}",
             f"ZERO_DTE_FLOW={zero_flow}",
             f"ALL_EXP_FLOW={all_flow}",
@@ -1422,13 +1419,25 @@ def export_spx_to_tradestation(flow_data, history_df):
             f"BEAR_FLOW={bear_flow}",
             f"UPDATED={datetime.now(CENTRAL_TZ).strftime('%H:%M:%S')}"
         ])
+    )
 
 # =========================================================
 # LOAD EXPIRATION FLOW FOR MAIN CHART
 # =========================================================
+
 try:
     exp_flow_data = load_expiration_flow(symbol)
     exp_history_df = append_exp_snapshot(exp_flow_data)
+
+    export_spx_to_tradestation(
+        exp_flow_data,
+        exp_history_df
+    )
+
+except Exception as e:
+
+    from pathlib import Path
+
 
     export_spx_to_tradestation(exp_flow_data, exp_history_df)
 
