@@ -1378,21 +1378,66 @@ if reset_exp_history:
     st.success(f"{symbol} flow chart history reset.")
 
 # =========================================================
+# TRADESTATION EXPORT
+# =========================================================
+TS_EXPORT_DIR = Path(r"C:\SG2\tradestation_flow")
+TS_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+def export_spx_to_tradestation(flow_data, history_df):
+
+    if flow_data.get("symbol", "").upper() != "SPX":
+        return
+
+    chart_df = build_chart_df(history_df)
+
+    zero_flow = 0
+    all_flow = 0
+
+    if chart_df is not None and not chart_df.empty:
+        zero_flow = float(chart_df["zero_dte_flow"].iloc[-1])
+        all_flow = float(chart_df["all_exp_flow"].iloc[-1])
+
+    gamma_levels = flow_data.get("gamma_levels", {})
+
+    call_gamma = gamma_levels.get("top_call_gamma") or 0
+    put_gamma = gamma_levels.get("top_put_gamma") or 0
+    spot = flow_data.get("spot", 0)
+
+    bull_flow = 1 if zero_flow > 150000000 else 0
+    bear_flow = 1 if zero_flow < -150000000 else 0
+
+    export_file = TS_EXPORT_DIR / "SG2_SPX_FLOW.txt"
+
+    export_file.write_text(
+        "\n".join([
+            f"SPOT={spot}",
+            f"ZERO_DTE_FLOW={zero_flow}",
+            f"ALL_EXP_FLOW={all_flow}",
+            f"CALL_GAMMA={call_gamma}",
+            f"PUT_GAMMA={put_gamma}",
+            f"BULL_FLOW={bull_flow}",
+            f"BEAR_FLOW={bear_flow}",
+            f"UPDATED={datetime.now(CENTRAL_TZ).strftime('%H:%M:%S')}"
+        ])
+    )
+
+# =========================================================
 # LOAD EXPIRATION FLOW FOR MAIN CHART
 # =========================================================
-try:
+
+    try:
     exp_flow_data = load_expiration_flow(symbol)
     exp_history_df = append_exp_snapshot(exp_flow_data)
 
+    export_spx_to_tradestation(
+        exp_flow_data,
+        exp_history_df
+    )
+
+except Exception as e:
+
     from pathlib import Path
 
-test_dir = Path(r"C:\SG2\tradestation_flow")
-test_dir.mkdir(parents=True, exist_ok=True)
-
-test_file = test_dir / "TEST.txt"
-
-with open(test_file, "w") as f:
-    f.write("HELLO FROM SG2")
 
     export_spx_to_tradestation(exp_flow_data, exp_history_df)
 
