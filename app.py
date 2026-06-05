@@ -1383,6 +1383,19 @@ if reset_exp_history:
 try:
     exp_flow_data = load_expiration_flow(symbol)
     exp_history_df = append_exp_snapshot(exp_flow_data)
+
+    from pathlib import Path
+
+test_dir = Path(r"C:\SG2\tradestation_flow")
+test_dir.mkdir(parents=True, exist_ok=True)
+
+test_file = test_dir / "TEST.txt"
+
+with open(test_file, "w") as f:
+    f.write("HELLO FROM SG2")
+
+    export_spx_to_tradestation(exp_flow_data, exp_history_df)
+
 except Exception as e:
     st.error(f"Could not load expiration flow chart data for {symbol}: {e}")
     st.stop()
