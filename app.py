@@ -341,23 +341,9 @@ with st.sidebar:
         value=2,
     )
 
-    flow_display_mode = st.radio(
-        "Main Flow Display",
-        options=["Net Premium", "Delta Notional"],
-        index=0,
-        horizontal=True,
-    )
-
     show_flow_dots = st.checkbox("Show FLOW Dots", value=True)
     show_signed_delta_line = st.checkbox("Show Signed Delta Line", value=False)
-
-    show_delta_notional_lines = st.checkbox(
-        "Overlay Delta Notional Lines",
-        value=False,
-        disabled=(flow_display_mode == "Delta Notional"),
-        help="Only needed when the main chart is set to Net Premium. Delta Notional mode already uses these lines as the main chart.",
-    )
-
+    show_delta_notional_lines = st.checkbox("Show Delta Notional Lines", value=False)
     show_right_labels = st.checkbox("Show Right Edge Labels", value=True)
 
     default_flow_dot_threshold = FLOW_DOT_THRESHOLDS.get(symbol, 25_000_000)
@@ -382,7 +368,7 @@ with st.sidebar:
     reset_exp_history = st.button("Reset Flow Chart History")
 
     st.markdown("---")
-    st.caption(f"Chart model: 0DTE and All Expiration {flow_display_mode.lower()} flow changes.")
+    st.caption("Chart model: 0DTE and All Expiration net premium flow changes.")
     st.caption("History files are capped at 1,500 rows per symbol.")
     st.caption("Delta Notional = Delta × Spot × Contracts × 100.")
 
@@ -1018,21 +1004,6 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     df["time"] = df["time"].astype(str)
     fig = go.Figure()
 
-    if flow_display_mode == "Delta Notional":
-        all_flow_col = "all_exp_delta_notional_flow"
-        zero_flow_col = "zero_dte_delta_notional_flow"
-        flow_axis_title = "Delta Notional Flow"
-        all_line_name = "All Exp Δ Notional"
-        zero_line_name = "0DTE Δ Notional"
-        chart_mode_title = "Delta Notional"
-    else:
-        all_flow_col = "all_exp_flow"
-        zero_flow_col = "zero_dte_flow"
-        flow_axis_title = "Premium Flow"
-        all_line_name = "All Exp Premium"
-        zero_line_name = "0DTE Premium"
-        chart_mode_title = "Net Premium"
-
     fig.add_trace(
         go.Scatter(
             x=df["time"],
@@ -1049,9 +1020,9 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     fig.add_trace(
         go.Scatter(
             x=df["time"],
-            y=df[all_flow_col],
+            y=df["all_exp_flow"],
             mode="lines",
-            name=all_line_name,
+            name="All Expirations",
             line=dict(color="#ffe100", width=5),
             yaxis="y",
             showlegend=True,
@@ -1062,9 +1033,9 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     fig.add_trace(
         go.Scatter(
             x=df["time"],
-            y=df[zero_flow_col],
+            y=df["zero_dte_flow"],
             mode="lines",
-            name=zero_line_name,
+            name="0DTE",
             line=dict(color="#00ff38", width=5),
             yaxis="y",
             showlegend=True,
@@ -1072,7 +1043,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
         )
     )
 
-    if show_delta_notional_lines and flow_display_mode == "Net Premium":
+    if show_delta_notional_lines:
         fig.add_trace(
             go.Scatter(
                 x=df["time"],
@@ -1125,13 +1096,13 @@ def sg2_flow_chart(history_df, symbol, flow_data):
 
     if show_flow_dots:
         threshold = float(flow_dot_threshold)
-        zero_prev = df[zero_flow_col].shift(1).fillna(0)
-        all_prev = df[all_flow_col].shift(1).fillna(0)
+        zero_prev = df["zero_dte_flow"].shift(1).fillna(0)
+        all_prev = df["all_exp_flow"].shift(1).fillna(0)
 
-        df["zero_bull_flow_dot"] = (df[zero_flow_col] > threshold) & (zero_prev <= threshold)
-        df["zero_bear_flow_dot"] = (df[zero_flow_col] < -threshold) & (zero_prev >= -threshold)
-        df["all_bull_flow_dot"] = (df[all_flow_col] > threshold) & (all_prev <= threshold)
-        df["all_bear_flow_dot"] = (df[all_flow_col] < -threshold) & (all_prev >= -threshold)
+        df["zero_bull_flow_dot"] = (df["zero_dte_flow"] > threshold) & (zero_prev <= threshold)
+        df["zero_bear_flow_dot"] = (df["zero_dte_flow"] < -threshold) & (zero_prev >= -threshold)
+        df["all_bull_flow_dot"] = (df["all_exp_flow"] > threshold) & (all_prev <= threshold)
+        df["all_bear_flow_dot"] = (df["all_exp_flow"] < -threshold) & (all_prev >= -threshold)
 
         zero_bull = df[df["zero_bull_flow_dot"]]
         zero_bear = df[df["zero_bear_flow_dot"]]
@@ -1142,7 +1113,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             fig,
             zero_bull,
             "time",
-            zero_flow_col,
+            "zero_dte_flow",
             "0DTE Bull FLOW",
             "#22c55e",
             "circle",
@@ -1154,7 +1125,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             fig,
             zero_bear,
             "time",
-            zero_flow_col,
+            "zero_dte_flow",
             "0DTE Bear FLOW",
             "#ef4444",
             "circle",
@@ -1166,7 +1137,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             fig,
             all_bull,
             "time",
-            all_flow_col,
+            "all_exp_flow",
             "All Exp Bull FLOW",
             "#facc15",
             "diamond",
@@ -1178,7 +1149,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             fig,
             all_bear,
             "time",
-            all_flow_col,
+            "all_exp_flow",
             "All Exp Bear FLOW",
             "#f97316",
             "diamond",
@@ -1192,8 +1163,8 @@ def sg2_flow_chart(history_df, symbol, flow_data):
         yref="y",
     )
 
-    latest_all = df[all_flow_col].iloc[-1]
-    latest_zero = df[zero_flow_col].iloc[-1]
+    latest_all = df["all_exp_flow"].iloc[-1]
+    latest_zero = df["zero_dte_flow"].iloc[-1]
     latest_spot = df["spot"].iloc[-1]
     latest_zero_delta_notional = df["zero_dte_delta_notional_flow"].iloc[-1]
     latest_all_delta_notional = df["all_exp_delta_notional_flow"].iloc[-1]
@@ -1204,22 +1175,22 @@ def sg2_flow_chart(history_df, symbol, flow_data):
         add_right_edge_label(fig, latest_time, latest_zero, fmt_money(latest_zero), "#00ff38", yref="y")
         add_right_edge_label(fig, latest_time, latest_spot, fmt_price(latest_spot), "#ffffff", yref="y2")
 
-        if show_delta_notional_lines and flow_display_mode == "Net Premium":
+        if show_delta_notional_lines:
             add_right_edge_label(fig, latest_time, latest_all_delta_notional, fmt_money(latest_all_delta_notional), "#a855f7", yref="y")
             add_right_edge_label(fig, latest_time, latest_zero_delta_notional, fmt_money(latest_zero_delta_notional), "#00e5ff", yref="y")
 
     flow_values_for_range = [
-        df[all_flow_col].min(),
-        df[zero_flow_col].min(),
+        df["all_exp_flow"].min(),
+        df["zero_dte_flow"].min(),
         0,
     ]
     flow_values_for_range_max = [
-        df[all_flow_col].max(),
-        df[zero_flow_col].max(),
+        df["all_exp_flow"].max(),
+        df["zero_dte_flow"].max(),
         0,
     ]
 
-    if show_delta_notional_lines and flow_display_mode == "Net Premium":
+    if show_delta_notional_lines:
         flow_values_for_range.extend([
             df["all_exp_delta_notional_flow"].min(),
             df["zero_dte_delta_notional_flow"].min(),
@@ -1281,7 +1252,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     fig.update_layout(
         title=dict(
             text=(
-                f"<b>{symbol} {chart_mode_title} Flow Trend | {chart_bucket}-Min Bars</b><br>"
+                f"<b>{symbol} Flow Trend | {chart_bucket}-Min Bars</b><br>"
                 f"<span style='font-size:14px;'>"
                 f"0DTE Exp: {flow_data['today_exp']} | "
                 f"All Exp Used: {len(flow_data['expirations_used'])} | "
@@ -1304,7 +1275,7 @@ def sg2_flow_chart(history_df, symbol, flow_data):
             type="category",
         ),
         yaxis=dict(
-            title=dict(text=flow_axis_title, font=dict(color="#facc15", size=14)),
+            title=dict(text="Premium Flow", font=dict(color="#facc15", size=14)),
             side="left",
             range=flow_range,
             showgrid=True,
@@ -1378,69 +1349,11 @@ if reset_exp_history:
     st.success(f"{symbol} flow chart history reset.")
 
 # =========================================================
-# TRADESTATION EXPORT
-# =========================================================
-TS_EXPORT_DIR = Path(r"C:\SG2\tradestation_flow")
-TS_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-
-def export_spx_to_tradestation(flow_data, history_df):
-
-    if flow_data.get("symbol", "").upper() != "SPX":
-        return
-
-    chart_df = build_chart_df(history_df)
-
-    zero_flow = 0
-    all_flow = 0
-
-    if chart_df is not None and not chart_df.empty:
-        zero_flow = float(chart_df["zero_dte_flow"].iloc[-1])
-        all_flow = float(chart_df["all_exp_flow"].iloc[-1])
-
-    gamma_levels = flow_data.get("gamma_levels", {})
-
-    call_gamma = gamma_levels.get("top_call_gamma") or 0
-    put_gamma = gamma_levels.get("top_put_gamma") or 0
-    spot = flow_data.get("spot", 0)
-
-    bull_flow = 1 if zero_flow > 150000000 else 0
-    bear_flow = 1 if zero_flow < -150000000 else 0
-
-    export_file = TS_EXPORT_DIR / "SG2_SPX_FLOW.txt"
-
-    export_file.write_text(
-        "\n".join([
-            f"SPOT={spot}",
-            f"ZERO_DTE_FLOW={zero_flow}",
-            f"ALL_EXP_FLOW={all_flow}",
-            f"CALL_GAMMA={call_gamma}",
-            f"PUT_GAMMA={put_gamma}",
-            f"BULL_FLOW={bull_flow}",
-            f"BEAR_FLOW={bear_flow}",
-            f"UPDATED={datetime.now(CENTRAL_TZ).strftime('%H:%M:%S')}"
-        ])
-    )
-
-# =========================================================
 # LOAD EXPIRATION FLOW FOR MAIN CHART
 # =========================================================
-
 try:
     exp_flow_data = load_expiration_flow(symbol)
     exp_history_df = append_exp_snapshot(exp_flow_data)
-
-    export_spx_to_tradestation(
-        exp_flow_data,
-        exp_history_df
-    )
-
-except Exception as e:
-
-    from pathlib import Path
-
-
-    export_spx_to_tradestation(exp_flow_data, exp_history_df)
-
 except Exception as e:
     st.error(f"Could not load expiration flow chart data for {symbol}: {e}")
     st.stop()
@@ -1504,8 +1417,6 @@ header_html = f"""
     </div>
     <div style="font-size:15px;font-weight:800;color:white;margin-top:8px;">
         Spot: <span class="green-text">{float(spot):.2f}</span>
-        &nbsp;&nbsp; | &nbsp;&nbsp;
-        Mode: <span class="cyan-text">{flow_display_mode}</span>
         &nbsp;&nbsp; | &nbsp;&nbsp;
         0DTE Exp: <span class="yellow-text">{odte_exp}</span>
         &nbsp;&nbsp; | &nbsp;&nbsp;
