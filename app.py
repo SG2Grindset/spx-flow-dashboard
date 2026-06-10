@@ -301,6 +301,30 @@ section[data-testid="stSidebar"] .stSlider span {
 .yellow-text { color: #ffdd00 !important; }
 .cyan-text { color: #00e5ff !important; }
 
+
+.exposure-card {
+    background: linear-gradient(180deg, #111923, #0b1118) !important;
+    border: 1px solid #263241;
+    border-radius: 14px;
+    box-shadow: 0 0 18px rgba(0,0,0,.35);
+    padding: 12px 14px 4px 14px;
+    margin-top: 12px;
+}
+
+.exposure-title {
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: 900;
+    margin-bottom: 2px;
+}
+
+.exposure-subtitle {
+    color: #a8b3c1;
+    font-size: 12px;
+    font-weight: 800;
+    margin-bottom: 6px;
+}
+
 hr { border-color: #263241; }
 </style>
 """,
@@ -345,6 +369,15 @@ with st.sidebar:
     show_signed_delta_line = st.checkbox("Show Signed Delta Line", value=False)
     show_delta_notional_lines = st.checkbox("Show Delta Notional Lines", value=False)
     show_right_labels = st.checkbox("Show Right Edge Labels", value=True)
+
+    show_exposure_charts = st.checkbox("Show GEX / DEX Charts", value=True)
+
+    exposure_strikes_each_side = st.slider(
+        "GEX/DEX Strikes Each Side",
+        min_value=5,
+        max_value=40,
+        value=STRIKE_COUNT_DEFAULTS.get(symbol, 5),
+    )
 
     default_flow_dot_threshold = FLOW_DOT_THRESHOLDS.get(symbol, 25_000_000)
 
@@ -984,6 +1017,211 @@ def add_event_trace(fig, events_df, x_col, y_col, name, marker_color, marker_sym
         )
     )
 
+
+# =========================================================
+# 0DTE GEX / DEX EXPOSURE CHARTS
+# =========================================================
+def build_exposure_df(chain_df, spot):
+    """Build 0DTE GEX and DEX by option contract, then chart by strike/type."""
+    if chain_df is None or chain_df.empty:
+        return pd.DataFrame()
+
+    df = chain_df.copy()
+
+    for col in ["strike", "open_interest", "delta", "gamma"]:
+        if col not in df.columns:
+            df[col] = 0
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    if "type" not in df.columns and "option_type" in df.columns:
+        df["type"] = df["option_type"]
+
+    df["type"] = (
+        df["type"]
+        .astype(str)
+        .str.lower()
+        .str.strip()
+        .replace({"calls": "call", "puts": "put", "c": "call", "p": "put"})
+    )
+
+    spot = float(spot)
+
+    df["gex"] = df["gamma"] * df["open_interest"] * 100 * (spot ** 2) * 0.01
+    df.loc[df["type"] == "put", "gex"] = -df.loc[df["type"] == "put", "gex"].abs()
+    df.loc[df["type"] == "call", "gex"] = df.loc[df["type"] == "call", "gex"].abs()
+
+    df["dex"] = df["delta"] * df["open_interest"] * 100 * spot
+
+    df = df[df["strike"] > 0]
+    df = df[df["type"].isin(["call", "put"])]
+
+    return df
+
+
+def plot_exposure_bars(df, spot, symbol, value_col, chart_title, y_title, call_label, put_label):
+    fig = go.Figure()
+
+    if df is None or df.empty:
+        fig.update_layout(
+            title=f"No {chart_title} data for {symbol}",
+            height=420,
+            paper_bgcolor="#111923",
+            plot_bgcolor="#05070d",
+            font=dict(color="white"),
+        )
+        return fig
+
+    calls = df[df["type"] == "call"].copy()
+    puts = df[df["type"] == "put"].copy()
+
+    fig.add_trace(
+        go.Bar(
+            x=calls["strike"].astype(int),
+            y=calls[value_col],
+            name=call_label,
+            marker_color="#00e676",
+            opacity=0.96,
+        )
+    )
+
+    fig.add_trace(
+        go.Bar(
+            x=puts["strike"].astype(int),
+            y=puts[value_col],
+            name=put_label,
+            marker_color="#ff3b3b",
+            opacity=0.96,
+        )
+    )
+
+    fig.add_vline(
+        x=float(spot),
+        line_width=2,
+        line_dash="dash",
+        line_color="#d7dde7",
+        annotation_text=f"{symbol} {float(spot):,.2f}",
+        annotation_position="top",
+    )
+
+    fig.update_layout(
+        height=455,
+        barmode="relative",
+        paper_bgcolor="#111923",
+        plot_bgcolor="#05070d",
+        font=dict(color="white", size=12),
+        margin=dict(l=58, r=28, t=35, b=58),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.03,
+            xanchor="center",
+            x=0.5,
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(size=11, color="white", family="Arial Black"),
+        ),
+        xaxis=dict(
+            title=dict(text="Strike", font=dict(color="white", size=13)),
+            tickfont=dict(color="white", size=11, family="Arial Black"),
+            tickmode="linear",
+            dtick=25 if symbol.upper() == "SPX" else 1,
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.09)",
+            zeroline=False,
+        ),
+        yaxis=dict(
+            title=dict(text=y_title, font=dict(color="white", size=13)),
+            tickformat="~s",
+            tickfont=dict(color="white", size=11, family="Arial Black"),
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.11)",
+            zeroline=True,
+            zerolinecolor="rgba(255,255,255,0.75)",
+        ),
+        hovermode="x unified",
+    )
+
+    return fig
+
+
+def render_exposure_section(symbol, spot, today_exp, strikes_each_side):
+    try:
+        zero_chain = get_option_chain(symbol, today_exp)
+        zero_chain = filter_near_spot(zero_chain, spot, strikes_each_side)
+        exposure_df = build_exposure_df(zero_chain, spot)
+    except Exception as exposure_error:
+        st.error(f"Could not load GEX / DEX charts for {symbol}: {exposure_error}")
+        return
+
+    if exposure_df.empty:
+        st.warning(f"No 0DTE exposure data available for {symbol}.")
+        return
+
+    st.markdown(
+        f"""
+        <div class="header-card">
+            <div style="font-size:22px;font-weight:900;color:white;">
+                {symbol} 0DTE GEX / DEX by Strike
+            </div>
+            <div style="font-size:13px;font-weight:800;color:#a8b3c1;margin-top:5px;">
+                0DTE Exp: <span class="yellow-text">{today_exp}</span>
+                &nbsp;&nbsp; | &nbsp;&nbsp;
+                Spot: <span class="green-text">{float(spot):,.2f}</span>
+                &nbsp;&nbsp; | &nbsp;&nbsp;
+                Strike Window: <span class="yellow-text">{strikes_each_side} listed strikes each side</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    gex_fig = plot_exposure_bars(
+        exposure_df,
+        spot,
+        symbol,
+        "gex",
+        "Gamma Exposure",
+        "Gamma Exposure",
+        "Call Gamma",
+        "Put Gamma",
+    )
+
+    dex_fig = plot_exposure_bars(
+        exposure_df,
+        spot,
+        symbol,
+        "dex",
+        "Delta Exposure",
+        "Delta Exposure",
+        "Call DEX",
+        "Put DEX",
+    )
+
+    left, right = st.columns(2)
+
+    with left:
+        st.markdown(
+            """
+            <div class="exposure-card">
+                <div class="exposure-title">0DTE Gamma Strikes</div>
+                <div class="exposure-subtitle">Call gamma in green. Put gamma in red.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.plotly_chart(gex_fig, use_container_width=True, config={"displayModeBar": False})
+
+    with right:
+        st.markdown(
+            """
+            <div class="exposure-card">
+                <div class="exposure-title">0DTE Delta Strikes</div>
+                <div class="exposure-subtitle">Call DEX in green. Put DEX in red.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.plotly_chart(dex_fig, use_container_width=True, config={"displayModeBar": False})
+
 # =========================================================
 # CHART BUILDER
 # =========================================================
@@ -1370,6 +1608,17 @@ st.plotly_chart(
     use_container_width=True,
     config={"displayModeBar": False},
 )
+
+# =========================================================
+# 0DTE GEX / DEX CHARTS - SIDE BY SIDE UNDER FLOW
+# =========================================================
+if show_exposure_charts:
+    render_exposure_section(
+        symbol=symbol,
+        spot=exp_flow_data.get("spot", 0),
+        today_exp=exp_flow_data.get("today_exp", ""),
+        strikes_each_side=exposure_strikes_each_side,
+    )
 
 # =========================================================
 # LOAD SG2 SNAPSHOT FOR METRICS BELOW CHART
