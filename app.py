@@ -773,10 +773,15 @@ def get_gamma_levels(chain_df, spot):
             "top_put_gamma": None,
         }
 
-    df["gamma"] = pd.to_numeric(df["gamma"], errors="coerce").fillna(0)
-    df["open_interest"] = pd.to_numeric(df["open_interest"], errors="coerce").fillna(0)
-    df["strike"] = pd.to_numeric(df["strike"], errors="coerce").fillna(0)
-    df["gamma_exposure"] = df["gamma"] * df["open_interest"] * 100
+    for col in ["gamma", "open_interest", "volume", "strike"]:
+        if col not in df.columns:
+            df[col] = 0
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    # SG² Dynamic Gamma Activity:
+    # Uses open interest plus current-session volume so gamma levels can react intraday.
+    df["activity"] = df["open_interest"] + df["volume"]
+    df["gamma_exposure"] = df["gamma"] * df["activity"] * 100
 
     spot = float(spot)
 
@@ -1022,13 +1027,13 @@ def add_event_trace(fig, events_df, x_col, y_col, name, marker_color, marker_sym
 # 0DTE GEX / DEX EXPOSURE CHARTS
 # =========================================================
 def build_exposure_df(chain_df, spot):
-    """Build 0DTE GEX and DEX by option contract, then chart by strike/type."""
+    """Build 0DTE dynamic GEX and DEX by option contract, then chart by strike/type."""
     if chain_df is None or chain_df.empty:
         return pd.DataFrame()
 
     df = chain_df.copy()
 
-    for col in ["strike", "open_interest", "delta", "gamma"]:
+    for col in ["strike", "open_interest", "volume", "delta", "gamma"]:
         if col not in df.columns:
             df[col] = 0
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
@@ -1046,11 +1051,16 @@ def build_exposure_df(chain_df, spot):
 
     spot = float(spot)
 
-    df["gex"] = df["gamma"] * df["open_interest"] * 100 * (spot ** 2) * 0.01
+    # SG² Dynamic Intraday Activity:
+    # open_interest gives the overnight base, volume adds today's live activity.
+    # This makes SPY/QQQ/SPX GEX and DEX react during the trading session.
+    df["activity"] = df["open_interest"] + df["volume"]
+
+    df["gex"] = df["gamma"] * df["activity"] * 100 * (spot ** 2) * 0.01
     df.loc[df["type"] == "put", "gex"] = -df.loc[df["type"] == "put", "gex"].abs()
     df.loc[df["type"] == "call", "gex"] = df.loc[df["type"] == "call", "gex"].abs()
 
-    df["dex"] = df["delta"] * df["open_interest"] * 100 * spot
+    df["dex"] = df["delta"] * df["activity"] * 100 * spot
 
     df = df[df["strike"] > 0]
     df = df[df["type"].isin(["call", "put"])]
@@ -1203,7 +1213,7 @@ def render_exposure_section(symbol, spot, today_exp, strikes_each_side):
             """
             <div class="exposure-card">
                 <div class="exposure-title">0DTE Gamma Strikes</div>
-                <div class="exposure-subtitle">Call gamma in green. Put gamma in red.</div>
+                <div class="exposure-subtitle">Call gamma in green. Put gamma in red. Uses OI + volume.</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1215,7 +1225,7 @@ def render_exposure_section(symbol, spot, today_exp, strikes_each_side):
             """
             <div class="exposure-card">
                 <div class="exposure-title">0DTE Delta Strikes</div>
-                <div class="exposure-subtitle">Call DEX in green. Put DEX in red.</div>
+                <div class="exposure-subtitle">Call DEX in green. Put DEX in red. Uses OI + volume.</div>
             </div>
             """,
             unsafe_allow_html=True,
