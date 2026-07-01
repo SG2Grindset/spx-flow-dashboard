@@ -370,7 +370,7 @@ with st.sidebar:
     show_delta_notional_lines = st.checkbox("Show Delta Notional Lines", value=False)
     show_right_labels = st.checkbox("Show Right Edge Labels", value=True)
 
-    show_exposure_charts = st.checkbox("Show GEX / DEX Charts", value=True)
+    show_exposure_charts = st.checkbox("Show GEX / DEX / Vanna Charts", value=True)
 
     exposure_strikes_each_side = st.slider(
         "GEX/DEX Strikes Each Side",
@@ -1024,7 +1024,7 @@ def add_event_trace(fig, events_df, x_col, y_col, name, marker_color, marker_sym
 
 
 # =========================================================
-# 0DTE GEX / DEX EXPOSURE CHARTS
+# 0DTE GEX / DEX / VANNA EXPOSURE CHARTS
 # =========================================================
 def build_exposure_df(chain_df, spot):
     """Build 0DTE dynamic GEX and DEX by option contract, then chart by strike/type."""
@@ -1061,6 +1061,11 @@ def build_exposure_df(chain_df, spot):
     df.loc[df["type"] == "call", "gex"] = df.loc[df["type"] == "call", "gex"].abs()
 
     df["dex"] = df["delta"] * df["activity"] * 100 * spot
+
+    # SG² Vanna Proxy:
+    # Tradier does not provide vanna directly, so this estimates relative vanna pressure
+    # using delta, gamma, activity, and spot. It is designed for strike-to-strike comparison.
+    df["vanna"] = df["delta"] * df["gamma"] * df["activity"] * 100 * spot
 
     df = df[df["strike"] > 0]
     df = df[df["type"].isin(["call", "put"])]
@@ -1114,7 +1119,7 @@ def plot_exposure_bars(df, spot, symbol, value_col, chart_title, y_title, call_l
     )
 
     fig.update_layout(
-        height=455,
+        height=430,
         barmode="relative",
         paper_bgcolor="#111923",
         plot_bgcolor="#05070d",
@@ -1159,7 +1164,7 @@ def render_exposure_section(symbol, spot, today_exp, strikes_each_side):
         zero_chain = filter_near_spot(zero_chain, spot, strikes_each_side)
         exposure_df = build_exposure_df(zero_chain, spot)
     except Exception as exposure_error:
-        st.error(f"Could not load GEX / DEX charts for {symbol}: {exposure_error}")
+        st.error(f"Could not load GEX / DEX / Vanna charts for {symbol}: {exposure_error}")
         return
 
     if exposure_df.empty:
@@ -1170,7 +1175,7 @@ def render_exposure_section(symbol, spot, today_exp, strikes_each_side):
         f"""
         <div class="header-card">
             <div style="font-size:22px;font-weight:900;color:white;">
-                {symbol} 0DTE GEX / DEX by Strike
+                {symbol} 0DTE GEX / DEX / Vanna by Strike
             </div>
             <div style="font-size:13px;font-weight:800;color:#a8b3c1;margin-top:5px;">
                 0DTE Exp: <span class="yellow-text">{today_exp}</span>
@@ -1206,7 +1211,18 @@ def render_exposure_section(symbol, spot, today_exp, strikes_each_side):
         "Put DEX",
     )
 
-    left, right = st.columns(2)
+    vanna_fig = plot_exposure_bars(
+        exposure_df,
+        spot,
+        symbol,
+        "vanna",
+        "Vanna Exposure",
+        "Vanna Exposure",
+        "Call Vanna",
+        "Put Vanna",
+    )
+
+    left, middle, right = st.columns(3)
 
     with left:
         st.markdown(
@@ -1220,7 +1236,7 @@ def render_exposure_section(symbol, spot, today_exp, strikes_each_side):
         )
         st.plotly_chart(gex_fig, use_container_width=True, config={"displayModeBar": False})
 
-    with right:
+    with middle:
         st.markdown(
             """
             <div class="exposure-card">
@@ -1231,6 +1247,18 @@ def render_exposure_section(symbol, spot, today_exp, strikes_each_side):
             unsafe_allow_html=True,
         )
         st.plotly_chart(dex_fig, use_container_width=True, config={"displayModeBar": False})
+
+    with right:
+        st.markdown(
+            """
+            <div class="exposure-card">
+                <div class="exposure-title">0DTE Vanna Strikes</div>
+                <div class="exposure-subtitle">Call Vanna in green. Put Vanna in red. Uses OI + volume.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.plotly_chart(vanna_fig, use_container_width=True, config={"displayModeBar": False})
 
 # =========================================================
 # CHART BUILDER
@@ -1620,7 +1648,7 @@ st.plotly_chart(
 )
 
 # =========================================================
-# 0DTE GEX / DEX CHARTS - SIDE BY SIDE UNDER FLOW
+# 0DTE GEX / DEX / VANNA CHARTS - SIDE BY SIDE UNDER FLOW
 # =========================================================
 if show_exposure_charts:
     render_exposure_section(
