@@ -370,6 +370,12 @@ with st.sidebar:
     show_delta_notional_lines = st.checkbox("Show Delta Notional Lines", value=False)
     show_right_labels = st.checkbox("Show Right Edge Labels", value=True)
 
+    exposure_mode = st.selectbox(
+        "Exposure Mode",
+        options=["0DTE", "1DTE", "Combined"],
+        index=0,
+    )
+
     show_exposure_charts = st.checkbox("Show GEX / DEX / Vanna Charts", value=True)
 
     exposure_strikes_each_side = st.slider(
@@ -1158,27 +1164,68 @@ def plot_exposure_bars(df, spot, symbol, value_col, chart_title, y_title, call_l
     return fig
 
 
-def render_exposure_section(symbol, spot, today_exp, strikes_each_side):
+def render_exposure_section(symbol, spot, expirations, strikes_each_side, exposure_mode):
+    """
+    Exposure Mode:
+      - 0DTE: first available expiration only
+      - 1DTE: second available expiration only
+      - Combined: first + second available expirations together
+    """
     try:
-        zero_chain = get_option_chain(symbol, today_exp)
-        zero_chain = filter_near_spot(zero_chain, spot, strikes_each_side)
-        exposure_df = build_exposure_df(zero_chain, spot)
+        if not expirations:
+            st.warning(f"No expirations available for {symbol}.")
+            return
+
+        zero_exp = expirations[0]
+        one_exp = expirations[1] if len(expirations) > 1 else None
+
+        if exposure_mode == "0DTE":
+            selected_exps = [zero_exp]
+        elif exposure_mode == "1DTE":
+            if one_exp is None:
+                st.warning(f"No 1DTE expiration available for {symbol}.")
+                return
+            selected_exps = [one_exp]
+        else:
+            selected_exps = [zero_exp]
+            if one_exp is not None:
+                selected_exps.append(one_exp)
+
+        chains = []
+
+        for exp in selected_exps:
+            temp = get_option_chain(symbol, exp)
+
+            if temp is not None and not temp.empty:
+                temp["expiration"] = exp
+                temp = filter_near_spot(temp, spot, strikes_each_side)
+                chains.append(temp)
+
+        if not chains:
+            st.warning(f"No {exposure_mode} exposure data available for {symbol}.")
+            return
+
+        chain_df = pd.concat(chains, ignore_index=True)
+        exposure_df = build_exposure_df(chain_df, spot)
+
     except Exception as exposure_error:
         st.error(f"Could not load GEX / DEX / Vanna charts for {symbol}: {exposure_error}")
         return
 
     if exposure_df.empty:
-        st.warning(f"No 0DTE exposure data available for {symbol}.")
+        st.warning(f"No {exposure_mode} exposure data available for {symbol}.")
         return
+
+    exp_text = " + ".join(selected_exps)
 
     st.markdown(
         f"""
         <div class="header-card">
             <div style="font-size:22px;font-weight:900;color:white;">
-                {symbol} 0DTE GEX / DEX / Vanna by Strike
+                {symbol} {exposure_mode} GEX / DEX / Vanna by Strike
             </div>
             <div style="font-size:13px;font-weight:800;color:#a8b3c1;margin-top:5px;">
-                0DTE Exp: <span class="yellow-text">{today_exp}</span>
+                Exposure Exp: <span class="yellow-text">{exp_text}</span>
                 &nbsp;&nbsp; | &nbsp;&nbsp;
                 Spot: <span class="green-text">{float(spot):,.2f}</span>
                 &nbsp;&nbsp; | &nbsp;&nbsp;
@@ -1226,9 +1273,9 @@ def render_exposure_section(symbol, spot, today_exp, strikes_each_side):
 
     with left:
         st.markdown(
-            """
+            f"""
             <div class="exposure-card">
-                <div class="exposure-title">0DTE Gamma Strikes</div>
+                <div class="exposure-title">{exposure_mode} Gamma Strikes</div>
                 <div class="exposure-subtitle">Call gamma in green. Put gamma in red. Uses OI + volume.</div>
             </div>
             """,
@@ -1238,9 +1285,9 @@ def render_exposure_section(symbol, spot, today_exp, strikes_each_side):
 
     with middle:
         st.markdown(
-            """
+            f"""
             <div class="exposure-card">
-                <div class="exposure-title">0DTE Delta Strikes</div>
+                <div class="exposure-title">{exposure_mode} Delta Strikes</div>
                 <div class="exposure-subtitle">Call DEX in green. Put DEX in red. Uses OI + volume.</div>
             </div>
             """,
@@ -1250,9 +1297,9 @@ def render_exposure_section(symbol, spot, today_exp, strikes_each_side):
 
     with right:
         st.markdown(
-            """
+            f"""
             <div class="exposure-card">
-                <div class="exposure-title">0DTE Vanna Strikes</div>
+                <div class="exposure-title">{exposure_mode} Vanna Strikes</div>
                 <div class="exposure-subtitle">Call Vanna in green. Put Vanna in red. Uses OI + volume.</div>
             </div>
             """,
@@ -1654,8 +1701,9 @@ if show_exposure_charts:
     render_exposure_section(
         symbol=symbol,
         spot=exp_flow_data.get("spot", 0),
-        today_exp=exp_flow_data.get("today_exp", ""),
+        expirations=exp_flow_data.get("expirations_used", []),
         strikes_each_side=exposure_strikes_each_side,
+        exposure_mode=exposure_mode,
     )
 
 # =========================================================
