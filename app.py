@@ -376,6 +376,11 @@ with st.sidebar:
         index=0,
     )
 
+    exposure_metric = st.selectbox(
+        "Exposure Metric",
+        options=["Gamma", "Delta", "Vanna"],
+        index=0,
+    )
 
     show_exposure_charts = st.checkbox("Show Exposure Chart", value=True)
 
@@ -1082,6 +1087,33 @@ def build_exposure_df(chain_df, spot):
     return df
 
 
+def exposure_metric_config(exposure_metric):
+    metric = str(exposure_metric).strip().lower()
+    if metric == "delta":
+        return {
+            "value_col": "dex",
+            "title": "Delta Exposure",
+            "y_title": "Delta Exposure",
+            "call_label": "Call DEX",
+            "put_label": "Put DEX",
+        }
+    if metric == "vanna":
+        return {
+            "value_col": "vanna",
+            "title": "Vanna Exposure",
+            "y_title": "Vanna Exposure",
+            "call_label": "Call Vanna",
+            "put_label": "Put Vanna",
+        }
+    return {
+        "value_col": "gex",
+        "title": "Gamma Exposure",
+        "y_title": "Gamma Exposure",
+        "call_label": "Call Gamma",
+        "put_label": "Put Gamma",
+    }
+
+
 def get_exposure_levels(exposure_df):
     """Return Call Wall, Put Wall, and Gamma Flip based on GEX by strike."""
     levels = {
@@ -1121,14 +1153,16 @@ def get_exposure_levels(exposure_df):
     return levels
 
 
-def plot_exposure_bars(df, spot, symbol, value_col, chart_title, y_title, call_label, put_label, levels=None, show_gamma_overlays=False):
-    """Plot one side-by-side exposure chart. Used for Gamma, Delta, and Vanna."""
+def plot_exposure_single_chart(df, spot, symbol, exposure_mode, exposure_metric, selected_exps, levels):
+    cfg = exposure_metric_config(exposure_metric)
+    value_col = cfg["value_col"]
+
     fig = go.Figure()
 
     if df is None or df.empty:
         fig.update_layout(
-            title=f"No {chart_title} data for {symbol}",
-            height=430,
+            title=f"No {cfg['title']} data for {symbol}",
+            height=620,
             paper_bgcolor="#111923",
             plot_bgcolor="#05070d",
             font=dict(color="white"),
@@ -1145,7 +1179,7 @@ def plot_exposure_bars(df, spot, symbol, value_col, chart_title, y_title, call_l
         go.Bar(
             x=call_by_strike["strike"],
             y=call_by_strike[value_col],
-            name=call_label,
+            name=cfg["call_label"],
             marker_color="#00e676",
             opacity=0.96,
         )
@@ -1155,7 +1189,7 @@ def plot_exposure_bars(df, spot, symbol, value_col, chart_title, y_title, call_l
         go.Bar(
             x=put_by_strike["strike"],
             y=put_by_strike[value_col],
-            name=put_label,
+            name=cfg["put_label"],
             marker_color="#ff3b3b",
             opacity=0.96,
         )
@@ -1163,57 +1197,72 @@ def plot_exposure_bars(df, spot, symbol, value_col, chart_title, y_title, call_l
 
     fig.add_vline(
         x=float(spot),
-        line_width=2,
+        line_width=3,
         line_dash="dash",
-        line_color="#d7dde7",
-        annotation_text=f"{symbol} {float(spot):,.2f}",
+        line_color="#ffffff",
+        annotation_text=f"Spot {float(spot):,.2f}",
         annotation_position="top",
     )
 
-    if show_gamma_overlays and levels:
-        overlay_defs = [
-            (levels.get("call_wall"), "Call Wall", "#00e676", "dot"),
-            (levels.get("put_wall"), "Put Wall", "#ff3b3b", "dot"),
-            (levels.get("gamma_flip"), "Gamma Flip", "#ffe100", "dash"),
-        ]
+    overlay_defs = [
+        (levels.get("call_wall"), "Call Wall", "#00e676", "dot"),
+        (levels.get("put_wall"), "Put Wall", "#ff3b3b", "dot"),
+        (levels.get("gamma_flip"), "Gamma Flip", "#ffe100", "dash"),
+    ]
 
-        strikes = pd.to_numeric(df["strike"], errors="coerce").dropna()
-        min_strike = float(strikes.min()) if not strikes.empty else None
-        max_strike = float(strikes.max()) if not strikes.empty else None
+    strikes = pd.to_numeric(df["strike"], errors="coerce").dropna()
+    min_strike = float(strikes.min()) if not strikes.empty else None
+    max_strike = float(strikes.max()) if not strikes.empty else None
 
-        for level, label, color, dash in overlay_defs:
-            if level is None or min_strike is None or max_strike is None:
-                continue
-            if float(level) < min_strike or float(level) > max_strike:
-                continue
-            fig.add_vline(
-                x=float(level),
-                line_width=2,
-                line_dash=dash,
-                line_color=color,
-                annotation_text=label,
-                annotation_position="bottom",
-            )
+    for level, label, color, dash in overlay_defs:
+        if level is None or min_strike is None or max_strike is None:
+            continue
+        if float(level) < min_strike or float(level) > max_strike:
+            continue
+        fig.add_vline(
+            x=float(level),
+            line_width=2,
+            line_dash=dash,
+            line_color=color,
+            annotation_text=label,
+            annotation_position="bottom",
+        )
+
+    exp_text = " + ".join(selected_exps)
 
     fig.update_layout(
-        height=430,
+        title=dict(
+            text=(
+                f"<b>{symbol} {exposure_mode} {cfg['title']} by Strike</b><br>"
+                f"<span style='font-size:14px;'>"
+                f"Exp: {exp_text} | Spot: {float(spot):,.2f} | "
+                f"Call Wall: {fmt_price(levels.get('call_wall'))} | "
+                f"Put Wall: {fmt_price(levels.get('put_wall'))} | "
+                f"Gamma Flip: {fmt_price(levels.get('gamma_flip'))}"
+                f"</span>"
+            ),
+            x=0.01,
+            xanchor="left",
+            font=dict(size=22, color="white"),
+        ),
+        height=640,
         barmode="relative",
         paper_bgcolor="#111923",
         plot_bgcolor="#05070d",
-        font=dict(color="white", size=12),
-        margin=dict(l=58, r=28, t=35, b=58),
+        font=dict(color="white", size=13),
+        margin=dict(l=75, r=45, t=95, b=75),
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=1.03,
+            y=1.02,
             xanchor="center",
             x=0.5,
             bgcolor="rgba(0,0,0,0)",
-            font=dict(size=11, color="white", family="Arial Black"),
+            font=dict(size=12, color="white", family="Arial Black"),
         ),
         xaxis=dict(
-            title=dict(text="Strike", font=dict(color="white", size=13)),
-            tickfont=dict(color="white", size=11, family="Arial Black"),
+            title=dict(text="Strike", font=dict(color="white", size=14)),
+            tickfont=dict(color="white", size=12, family="Arial Black"),
             tickmode="linear",
             dtick=25 if symbol.upper() == "SPX" else 1,
             showgrid=True,
@@ -1221,9 +1270,9 @@ def plot_exposure_bars(df, spot, symbol, value_col, chart_title, y_title, call_l
             zeroline=False,
         ),
         yaxis=dict(
-            title=dict(text=y_title, font=dict(color="white", size=13)),
+            title=dict(text=cfg["y_title"], font=dict(color="white", size=14)),
             tickformat="~s",
-            tickfont=dict(color="white", size=11, family="Arial Black"),
+            tickfont=dict(color="white", size=12, family="Arial Black"),
             showgrid=True,
             gridcolor="rgba(255,255,255,0.11)",
             zeroline=True,
@@ -1235,8 +1284,8 @@ def plot_exposure_bars(df, spot, symbol, value_col, chart_title, y_title, call_l
     return fig
 
 
-def render_exposure_section(symbol, spot, expirations, strikes_each_side, exposure_mode):
-    """Render Gamma, Delta, and Vanna side-by-side for 0DTE, 1DTE, or combined 0DTE + 1DTE."""
+def render_exposure_section(symbol, spot, expirations, strikes_each_side, exposure_mode, exposure_metric):
+    """Render one large exposure chart for 0DTE, 1DTE, or combined 0DTE + 1DTE."""
     try:
         if not expirations:
             st.warning(f"No expirations available for {symbol}.")
@@ -1258,8 +1307,10 @@ def render_exposure_section(symbol, spot, expirations, strikes_each_side, exposu
                 selected_exps.append(one_exp)
 
         chains = []
+
         for exp in selected_exps:
             temp = get_option_chain(symbol, exp)
+
             if temp is not None and not temp.empty:
                 temp["expiration"] = exp
                 temp = filter_near_spot(temp, spot, strikes_each_side)
@@ -1273,34 +1324,34 @@ def render_exposure_section(symbol, spot, expirations, strikes_each_side, exposu
         exposure_df = build_exposure_df(chain_df, spot)
 
     except Exception as exposure_error:
-        st.error(f"Could not load GEX / DEX / Vanna charts for {symbol}: {exposure_error}")
+        st.error(f"Could not load exposure chart for {symbol}: {exposure_error}")
         return
 
     if exposure_df.empty:
         st.warning(f"No {exposure_mode} exposure data available for {symbol}.")
         return
 
+    cfg = exposure_metric_config(exposure_metric)
+    value_col = cfg["value_col"]
     levels = get_exposure_levels(exposure_df)
     exp_text = " + ".join(selected_exps)
 
     st.markdown(
         f"""
         <div class="header-card">
-            <div style="font-size:22px;font-weight:900;color:white;">
-                {symbol} {exposure_mode} GEX / DEX / Vanna by Strike
+            <div style="font-size:24px;font-weight:900;color:white;">
+                {symbol} Dealer Exposure
             </div>
-            <div style="font-size:13px;font-weight:800;color:#a8b3c1;margin-top:5px;">
+            <div style="font-size:14px;font-weight:800;color:#a8b3c1;margin-top:6px;">
+                Mode: <span class="yellow-text">{exposure_mode}</span>
+                &nbsp;&nbsp; | &nbsp;&nbsp;
+                Metric: <span class="yellow-text">{exposure_metric}</span>
+                &nbsp;&nbsp; | &nbsp;&nbsp;
                 Exp: <span class="yellow-text">{exp_text}</span>
                 &nbsp;&nbsp; | &nbsp;&nbsp;
                 Spot: <span class="green-text">{float(spot):,.2f}</span>
                 &nbsp;&nbsp; | &nbsp;&nbsp;
-                Strike Window: <span class="yellow-text">{strikes_each_side} listed strikes each side</span>
-                &nbsp;&nbsp; | &nbsp;&nbsp;
-                Call Wall: <span class="green-text">{fmt_price(levels.get('call_wall'))}</span>
-                &nbsp;&nbsp; | &nbsp;&nbsp;
-                Put Wall: <span class="red-text">{fmt_price(levels.get('put_wall'))}</span>
-                &nbsp;&nbsp; | &nbsp;&nbsp;
-                Gamma Flip: <span class="yellow-text">{fmt_price(levels.get('gamma_flip'))}</span>
+                Strike Window: <span class="yellow-text">{strikes_each_side} each side</span>
             </div>
         </div>
         """,
@@ -1312,7 +1363,7 @@ def render_exposure_section(symbol, spot, expirations, strikes_each_side, exposu
         total_abs = 0.0
         for exp in selected_exps:
             exp_df = exposure_df[exposure_df["expiration"] == exp].copy()
-            exp_abs = float(pd.to_numeric(exp_df.get("gex", 0), errors="coerce").abs().sum())
+            exp_abs = float(pd.to_numeric(exp_df.get(value_col, 0), errors="coerce").abs().sum())
             contribution_rows.append((exp, exp_abs))
             total_abs += exp_abs
 
@@ -1321,90 +1372,35 @@ def render_exposure_section(symbol, spot, expirations, strikes_each_side, exposu
             for exp, exp_abs in contribution_rows:
                 pct = (exp_abs / total_abs) * 100
                 label = "0DTE" if exp == selected_exps[0] else "1DTE"
-                contrib_html += f"<span class='yellow-text'>{label} Gamma Contribution:</span> {pct:.0f}% &nbsp;&nbsp;"
+                contrib_html += f"<span class='yellow-text'>{label} Contribution:</span> {pct:.0f}% &nbsp;&nbsp;"
 
             st.markdown(
                 f"""
                 <div class="metric-card">
-                    <div class="metric-label">Combined Dealer Gamma Exposure</div>
+                    <div class="metric-label">Combined Dealer Exposure</div>
                     <div class="metric-value">{contrib_html}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-    gex_fig = plot_exposure_bars(
+    summary_cols = st.columns(4)
+    summary_cols[0].markdown(metric_html("Call Wall", fmt_price(levels.get("call_wall")), "green-text"), unsafe_allow_html=True)
+    summary_cols[1].markdown(metric_html("Put Wall", fmt_price(levels.get("put_wall")), "red-text"), unsafe_allow_html=True)
+    summary_cols[2].markdown(metric_html("Gamma Flip", fmt_price(levels.get("gamma_flip")), "yellow-text"), unsafe_allow_html=True)
+    summary_cols[3].markdown(metric_html("Net Gamma", fmt_money(levels.get("net_gamma", 0)), color_class(levels.get("net_gamma", 0))), unsafe_allow_html=True)
+
+    fig = plot_exposure_single_chart(
         exposure_df,
         spot,
         symbol,
-        "gex",
-        "Gamma Exposure",
-        "Gamma Exposure",
-        "Call Gamma",
-        "Put Gamma",
-        levels=levels,
-        show_gamma_overlays=True,
+        exposure_mode,
+        exposure_metric,
+        selected_exps,
+        levels,
     )
 
-    dex_fig = plot_exposure_bars(
-        exposure_df,
-        spot,
-        symbol,
-        "dex",
-        "Delta Exposure",
-        "Delta Exposure",
-        "Call DEX",
-        "Put DEX",
-    )
-
-    vanna_fig = plot_exposure_bars(
-        exposure_df,
-        spot,
-        symbol,
-        "vanna",
-        "Vanna Exposure",
-        "Vanna Exposure",
-        "Call Vanna",
-        "Put Vanna",
-    )
-
-    left, middle, right = st.columns(3)
-
-    with left:
-        st.markdown(
-            f"""
-            <div class="exposure-card">
-                <div class="exposure-title">{exposure_mode} Gamma Strikes</div>
-                <div class="exposure-subtitle">Call gamma in green. Put gamma in red. Includes Call Wall, Put Wall, and Gamma Flip.</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.plotly_chart(gex_fig, use_container_width=True, config={"displayModeBar": False})
-
-    with middle:
-        st.markdown(
-            f"""
-            <div class="exposure-card">
-                <div class="exposure-title">{exposure_mode} Delta Strikes</div>
-                <div class="exposure-subtitle">Call DEX in green. Put DEX in red. Uses OI + volume.</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.plotly_chart(dex_fig, use_container_width=True, config={"displayModeBar": False})
-
-    with right:
-        st.markdown(
-            f"""
-            <div class="exposure-card">
-                <div class="exposure-title">{exposure_mode} Vanna Strikes</div>
-                <div class="exposure-subtitle">Call Vanna in green. Put Vanna in red. Uses OI + volume.</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.plotly_chart(vanna_fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 # =========================================================
 # CHART BUILDER
@@ -1803,6 +1799,7 @@ if show_exposure_charts:
         expirations=exp_flow_data.get("expirations_used", []),
         strikes_each_side=exposure_strikes_each_side,
         exposure_mode=exposure_mode,
+        exposure_metric=exposure_metric,
     )
 
 # =========================================================
