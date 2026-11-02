@@ -1745,21 +1745,22 @@ def sg2_flow_chart(history_df, symbol, flow_data):
 # =========================================================
 # TOP SYMBOL BUTTONS
 # =========================================================
-symbol_cols = st.columns(len(SYMBOLS))
+# Display six symbols in two rows of three.
+for row_start in range(0, len(SYMBOLS), 3):
+    symbol_cols = st.columns(3)
+    for col_index, sym in enumerate(SYMBOLS[row_start:row_start + 3]):
+        icon = SYMBOL_ICONS.get(sym, "📊")
+        is_active = sym == st.session_state.selected_symbol
 
-for i, sym in enumerate(SYMBOLS):
-    icon = SYMBOL_ICONS.get(sym, "📊")
-    is_active = sym == st.session_state.selected_symbol
-
-    with symbol_cols[i]:
-        if st.button(
-            f"{icon}  {sym}",
-            key=f"symbol_button_{sym}_{i}",
-            use_container_width=True,
-            type="primary" if is_active else "secondary",
-        ):
-            st.session_state.selected_symbol = sym
-            st.rerun()
+        with symbol_cols[col_index]:
+            if st.button(
+                f"{icon}  {sym}",
+                key=f"symbol_button_{sym}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary",
+            ):
+                st.session_state.selected_symbol = sym
+                st.rerun()
 
 symbol = st.session_state.selected_symbol
 icon = SYMBOL_ICONS.get(symbol, "📊")
