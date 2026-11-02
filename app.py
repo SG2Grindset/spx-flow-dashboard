@@ -141,30 +141,43 @@ if not check_password():
 # =========================================================
 # SYMBOL CONFIG
 # =========================================================
-SYMBOLS = ["SPY", "SPX", "QQQ"]
+SYMBOLS = ["SPY", "SPX", "QQQ", "TSLA", "AAPL", "NVDA"]
 
 SYMBOL_ICONS = {
     "SPY": "🕷️",
     "SPX": "📈",
     "QQQ": "📊",
+    "TSLA": "🚗",
+    "AAPL": "🍎",
+    "NVDA": "🟢",
 }
 
+# Initial defaults; tune based on observed per-symbol flow.
 FLOW_DOT_THRESHOLDS = {
     "SPY": 25_000_000,
     "SPX": 150_000_000,
     "QQQ": 25_000_000,
+    "TSLA": 10_000_000,
+    "AAPL": 10_000_000,
+    "NVDA": 10_000_000,
 }
 
 CHAIN_WIDTH_DEFAULTS = {
     "SPY": 5,
     "SPX": 25,
     "QQQ": 5,
+    "TSLA": 5,
+    "AAPL": 5,
+    "NVDA": 5,
 }
 
 STRIKE_COUNT_DEFAULTS = {
     "SPY": 5,
     "QQQ": 5,
     "SPX": 25,
+    "TSLA": 5,
+    "AAPL": 5,
+    "NVDA": 5,
 }
 
 # =========================================================
