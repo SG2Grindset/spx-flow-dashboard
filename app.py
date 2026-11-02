@@ -1,4 +1,7 @@
 import os
+import threading
+import time
+from collections import deque
 from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -29,7 +32,7 @@ st.set_page_config(
 ENV_PATH = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=ENV_PATH, override=True)
 
-TRADIER_API_KEY = os.getenv("TRADIER_API_KEY")
+TRADIER_API_KEY = os.getenv("TRADIER_API_KEY") or st.secrets.get("TRADIER_API_KEY", None)
 TRADIER_BASE_URL = os.getenv("TRADIER_BASE_URL", "https://api.tradier.com/v1")
 
 HEADERS = {
@@ -371,12 +374,8 @@ with st.sidebar:
         index=0,
     )
 
-    lookback_hours = st.slider(
-        "Lookback Hours",
-        min_value=1,
-        max_value=8,
-        value=2,
-    )
+    lookback_hours = 0.5  # Fixed rolling 30-minute flow history
+    st.caption("Flow history: rolling 30 minutes")
 
     show_flow_dots = st.checkbox("Show FLOW Dots", value=True)
     show_signed_delta_line = st.checkbox("Show Signed Delta Line", value=False)
@@ -578,7 +577,7 @@ def flatten_greeks(df):
 
     return df
 
-def get_option_chain(symbol, expiration):
+def _fetch_option_chain(symbol, expiration):
     data = tradier_get(
         "markets/options/chains",
         params={
@@ -681,6 +680,11 @@ def get_option_chain(symbol, expiration):
     df = df[df["type"].isin(["call", "put"])]
 
     return df
+
+# Share recent chain responses between the collector and exposure charts.
+@st.cache_data(ttl=12, show_spinner=False)
+def get_option_chain(symbol, expiration):
+    return _fetch_option_chain(symbol, expiration)
 
 def filter_near_spot(df, spot, strikes_each_side):
     """
@@ -828,12 +832,12 @@ def get_gamma_levels(chain_df, spot):
         "top_put_gamma": top_put,
     }
 
-def load_expiration_flow(symbol):
+def load_expiration_flow(symbol, expiration_count=5):
     spot = get_price(symbol)
     expirations = get_expirations(symbol)
 
     today_exp = expirations[0]
-    selected_expirations = expirations[:all_exp_count]
+    selected_expirations = expirations[:expiration_count]
     strikes_each_side = STRIKE_COUNT_DEFAULTS.get(symbol.upper(), 5)
 
     chains = []
@@ -927,7 +931,9 @@ def append_exp_snapshot(flow_data):
     )
 
     # Prevent massive CSV files and hard drive fill-up.
-    df = df.tail(1500).copy()
+    cutoff = now.replace(tzinfo=None) - pd.Timedelta(minutes=30)
+    df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
+    df = df[df["datetime"] >= cutoff].tail(150).copy()
     df.to_csv(file_path, index=False)
 
     return df
@@ -947,8 +953,8 @@ def build_chart_df(history_df):
     if df.empty:
         return pd.DataFrame()
 
-    max_time = df["datetime"].max()
-    min_time = max_time - pd.Timedelta(hours=lookback_hours)
+    max_time = datetime.now(CENTRAL_TZ).replace(tzinfo=None)
+    min_time = max_time - pd.Timedelta(minutes=30)
     df = df[df["datetime"] >= min_time]
 
     if df.empty:
@@ -1743,6 +1749,69 @@ def sg2_flow_chart(history_df, symbol, flow_data):
     return fig
 
 # =========================================================
+# SHARED BACKGROUND FLOW COLLECTOR (one per Streamlit process)
+# =========================================================
+@st.cache_resource
+def get_collector():
+    state = {"lock": threading.RLock(), "history": {sym: deque(maxlen=150) for sym in SYMBOLS},
+             "latest": {}, "last": {}, "errors": {}, "active": "SPX", "backoff": {},
+             "expiration_count": 5}
+
+    def collect_loop():
+        while True:
+            now = time.monotonic()
+            with state["lock"]:
+                active = state["active"]
+                count = state["expiration_count"]
+                order = [active] + [x for x in SYMBOLS if x != active]
+            due = None
+            for sym in order:
+                with state["lock"]:
+                    interval = 15 if sym == active else 60
+                    last = state["last"].get(sym, -1e9)
+                    wait_until = state["backoff"].get(sym, 0)
+                if now - last >= interval and now >= wait_until:
+                    due = sym
+                    break
+            if due is None:
+                time.sleep(1)
+                continue
+            try:
+                result = load_expiration_flow(due, expiration_count=count)
+                stamp = datetime.now(CENTRAL_TZ).replace(tzinfo=None)
+                row = {"datetime": stamp, "spot": result["spot"],
+                       "zero_dte_net_premium": result["zero_dte"]["net_premium"],
+                       "all_exp_net_premium": result["all_exp"]["net_premium"],
+                       "zero_dte_delta_notional": result["zero_dte"].get("net_delta_notional", 0),
+                       "all_exp_delta_notional": result["all_exp"].get("net_delta_notional", 0)}
+                with state["lock"]:
+                    history = state["history"][due]
+                    history.append(row)
+                    cutoff = stamp - pd.Timedelta(minutes=30)
+                    while history and history[0]["datetime"] < cutoff:
+                        history.popleft()
+                    state["latest"][due] = result
+                    state["errors"].pop(due, None)
+            except Exception as exc:
+                with state["lock"]:
+                    state["errors"][due] = str(exc)
+                    if "429" in str(exc):
+                        state["backoff"][due] = time.monotonic() + 120
+            finally:
+                with state["lock"]:
+                    state["last"][due] = time.monotonic()
+
+    thread = threading.Thread(target=collect_loop, daemon=True, name="sg2-flow-collector")
+    thread.start()
+    return state
+
+collector = get_collector()
+with collector["lock"]:
+    collector["active"] = st.session_state.selected_symbol
+    collector["expiration_count"] = all_exp_count
+
+
+# =========================================================
 # TOP SYMBOL BUTTONS
 # =========================================================
 # Display six symbols in two rows of three.
@@ -1781,17 +1850,26 @@ st.markdown(
 # RESET HISTORY
 # =========================================================
 if reset_exp_history:
-    reset_symbol_history(symbol)
+    with collector["lock"]:
+        collector["history"][symbol].clear()
     st.success(f"{symbol} flow chart history reset.")
 
-# =========================================================
-# LOAD EXPIRATION FLOW FOR MAIN CHART
-# =========================================================
-try:
-    exp_flow_data = load_expiration_flow(symbol)
-    exp_history_df = append_exp_snapshot(exp_flow_data)
-except Exception as e:
-    st.error(f"Could not load expiration flow chart data for {symbol}: {e}")
+with collector["lock"]:
+    collector["active"] = symbol
+    exp_flow_data = collector["latest"].get(symbol)
+    rows = list(collector["history"][symbol])
+    collection_error = collector["errors"].get(symbol)
+
+if exp_flow_data is None:
+    st.info(f"Collecting first flow snapshot for {symbol}. Refresh in a few seconds.")
+    if collection_error:
+        st.warning(f"Collector: {collection_error}")
+    st.stop()
+
+cutoff = datetime.now(CENTRAL_TZ).replace(tzinfo=None) - pd.Timedelta(minutes=30)
+exp_history_df = pd.DataFrame([r for r in rows if r["datetime"] >= cutoff])
+if exp_history_df.empty:
+    st.info("Waiting for the first 30-minute history sample.")
     st.stop()
 
 # =========================================================
